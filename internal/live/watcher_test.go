@@ -120,7 +120,7 @@ func TestFallbacksWithoutAI(t *testing.T) {
 	}
 	w.HandleSurge(context.Background(), Surge{At: time.Unix(1_800_000_000, 0).Add(time.Hour)})
 	it := p.queued[0]
-	if it.Title == "" || it.Hashtags[0] != "#HadesII" || !strings.Contains(it.ClipNote, "twitch-login") {
+	if it.Title == "" || it.Hashtags[0] != "#HadesII" || !strings.Contains(it.ClipNote, "connect-twitch") {
 		t.Fatalf("fallback item %+v", it)
 	}
 }

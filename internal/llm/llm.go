@@ -91,10 +91,16 @@ type Client struct {
 	Model   string
 	Tokens  TokenSource
 	HTTP    *http.Client
+	sem     chan struct{} // bounds concurrent calls
 }
 
+// MaxConcurrent calls per client; more wait their turn, which keeps a
+// small server's memory flat and a shared key under its rate limit.
+const MaxConcurrent = 2
+
 func New(baseURL, model string, tokens TokenSource) *Client {
-	return &Client{BaseURL: baseURL, Model: model, Tokens: tokens, HTTP: &http.Client{Timeout: 90 * time.Second}}
+	return &Client{BaseURL: baseURL, Model: model, Tokens: tokens, HTTP: &http.Client{Timeout: 90 * time.Second},
+		sem: make(chan struct{}, MaxConcurrent)}
 }
 
 type message struct {
@@ -103,6 +109,14 @@ type message struct {
 }
 
 func (c *Client) Chat(ctx context.Context, system, user string) (string, error) {
+	if c.sem != nil {
+		select {
+		case c.sem <- struct{}{}:
+			defer func() { <-c.sem }()
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
 	tok, err := c.Tokens.Token(ctx)
 	if err != nil {
 		return "", err

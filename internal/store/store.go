@@ -17,10 +17,13 @@ type Guild struct {
 	AnnounceChannel string               `json:"announce_channel,omitempty"` // go-live posts
 	AnnounceMention string               `json:"announce_mention,omitempty"` // "", "@here", or a role ID
 	Muted           map[string]time.Time `json:"muted,omitempty"`            // alert key -> muted until
+	TZ              string               `json:"tz,omitempty"`               // IANA zone for /besttime
+	TwitchChannel   string               `json:"twitch_channel,omitempty"`   // the creator's channel (/mychannel)
 }
 
 type Store struct {
 	mu     sync.Mutex
+	wmu    sync.Mutex // serializes file writes
 	path   string
 	Guilds map[string]*Guild `json:"guilds"`
 }
@@ -49,11 +52,27 @@ func (s *Store) Update(guildID string, fn func(g *Guild)) error {
 		s.Guilds[guildID] = g
 	}
 	fn(g)
+	s.mu.Unlock()
+	return s.save()
+}
+
+// Delete forgets everything stored for a guild.
+func (s *Store) Delete(guildID string) error {
+	s.mu.Lock()
+	delete(s.Guilds, guildID)
+	s.mu.Unlock()
+	return s.save()
+}
+
+func (s *Store) save() error {
+	s.mu.Lock()
 	b, err := json.MarshalIndent(s, "", "  ")
 	s.mu.Unlock()
 	if err != nil || s.path == "" {
 		return err
 	}
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
 		return err
 	}

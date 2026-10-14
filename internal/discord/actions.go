@@ -68,9 +68,9 @@ func (b *Bot) action(ctx context.Context, i *discordgo.InteractionCreate, name s
 		return b.stopSending(i, opt["what"]), nil
 	case "raid":
 		maxV, _ := strconv.Atoi(opt["max_viewers"])
-		return b.raidCmd(ctx, opt["game"], maxV)
+		return b.raidCmd(ctx, i.GuildID, opt["game"], maxV)
 	case "clip":
-		return b.clipCmd(ctx), nil
+		return b.clipCmd(i.GuildID), nil
 	}
 	return "Unknown command.", nil
 }
@@ -99,13 +99,13 @@ func (b *Bot) sendHere(i *discordgo.InteractionCreate, what, role string) string
 		}
 		return "✅ Trend alerts will be posted here when a genre or game spikes or drops sharply. Each alert has a **Mute** button."
 	case whatClips:
-		if b.Watcher == nil {
-			return "Saved, but clips need your channel name (TWITCH_CHANNEL) so TrendPilot can follow your chat. Run setup again to add it."
+		if b.watcherFor(i.GuildID) == nil {
+			return "Saved. Now set your Twitch channel with `/mychannel` so TrendPilot can follow your chat."
 		}
 		return "✅ When chat goes wild on your stream, the clip, a title and hashtags will land here for **Approve / New title / Discard**."
 	default:
-		if b.Watcher == nil {
-			return "Saved, but go-live posts need your channel name (TWITCH_CHANNEL). Run setup again to add it."
+		if b.watcherFor(i.GuildID) == nil {
+			return "Saved. Now set your Twitch channel with `/mychannel` so TrendPilot knows when you go live."
 		}
 		ping := "no ping"
 		if role != "" {
@@ -132,7 +132,7 @@ func (b *Bot) stopSending(i *discordgo.InteractionCreate, what string) string {
 	return "Stopped."
 }
 
-func (b *Bot) raidCmd(ctx context.Context, game string, maxViewers int) (string, []discordgo.MessageComponent) {
+func (b *Bot) raidCmd(ctx context.Context, guildID, game string, maxViewers int) (string, []discordgo.MessageComponent) {
 	if b.app.Games == nil {
 		return notReady, nil
 	}
@@ -140,9 +140,9 @@ func (b *Bot) raidCmd(ctx context.Context, game string, maxViewers int) (string,
 		maxViewers = 30
 	}
 	exclude := ""
-	if b.Watcher != nil {
-		exclude = b.Watcher.Channel
-		if st, live := b.Watcher.Live(); live && game == "" {
+	if w := b.watcherFor(guildID); w != nil {
+		exclude = w.Channel
+		if st, isLive := w.Live(); isLive && game == "" {
 			game = st.GameName
 		}
 	}
@@ -159,7 +159,8 @@ func (b *Bot) raidCmd(ctx context.Context, game string, maxViewers int) (string,
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "**Raid targets in %s** (%d–%d viewers, live 20+ min)\n", name, minRaidSize, maxViewers)
 	var raidBtns, linkBtns []discordgo.MessageComponent
-	canRaid := b.User != nil && b.User.HasScope("channel:manage:raids")
+	u := b.userFor(guildID)
+	canRaid := u != nil && u.HasScope("channel:manage:raids")
 	for n, t := range targets {
 		mature := ""
 		if t.Mature {
@@ -175,7 +176,7 @@ func (b *Bot) raidCmd(ctx context.Context, game string, maxViewers int) (string,
 	if canRaid {
 		sb.WriteString("\nPress **Raid** to send your viewers (you must be live). Twitch shows a 90-second countdown you can still cancel.")
 	} else {
-		sb.WriteString("\nType `/raid <name>` in your Twitch chat to raid. *(Sign in with `trendpilot twitch-login` to get 1-click Raid buttons here.)*")
+		sb.WriteString("\nType `/raid <name>` in your Twitch chat to raid. *(Run `/connect-twitch` to get 1-click Raid buttons here.)*")
 	}
 	comps := []discordgo.MessageComponent{discordgo.ActionsRow{Components: linkBtns}}
 	if len(raidBtns) > 0 {
@@ -184,14 +185,15 @@ func (b *Bot) raidCmd(ctx context.Context, game string, maxViewers int) (string,
 	return sb.String(), comps
 }
 
-func (b *Bot) clipCmd(ctx context.Context) string {
-	if b.Watcher == nil {
-		return "Clips need your channel name (TWITCH_CHANNEL). Run setup again to add it."
+func (b *Bot) clipCmd(guildID string) string {
+	w := b.watcherFor(guildID)
+	if w == nil {
+		return "Set your Twitch channel first with `/mychannel`."
 	}
-	if _, live := b.Watcher.Live(); !live {
+	if _, isLive := w.Live(); !isLive {
 		return "You're not live right now."
 	}
-	go b.Watcher.HandleSurge(context.Background(), live.Surge{At: time.Now()})
+	go w.HandleSurge(context.Background(), live.Surge{At: time.Now()})
 	return "🎬 Clipping now. It'll appear in the clips channel in about 20 seconds."
 }
 
@@ -223,7 +225,7 @@ func (b *Bot) onComponent(s *discordgo.Session, i *discordgo.InteractionCreate) 
 
 	switch parts[0] {
 	case "bt":
-		reply(b.bestTimeCmd(parts[1]))
+		reply(b.bestTimeCmd(parts[1], i.GuildID))
 	case "rt":
 		if !b.canManage(i) {
 			reply("Only members with **Manage Server** can do that.")
@@ -231,7 +233,7 @@ func (b *Bot) onComponent(s *discordgo.Session, i *discordgo.InteractionCreate) 
 		}
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{Flags: discordgo.MessageFlagsEphemeral}})
-		out, comps := b.raidCmd(ctx, parts[1], 0)
+		out, comps := b.raidCmd(ctx, i.GuildID, parts[1], 0)
 		edit := &discordgo.WebhookEdit{Content: &out}
 		if len(comps) > 0 {
 			edit.Components = &comps
@@ -249,11 +251,12 @@ func (b *Bot) onComponent(s *discordgo.Session, i *discordgo.InteractionCreate) 
 		})
 		reply("🔕 Muted that alert for 24 hours.")
 	case "raid":
-		if !b.canManage(i) || b.User == nil || len(parts) < 3 {
-			reply("Only members with **Manage Server** can start a raid, and the streamer must be signed in.")
+		u := b.userFor(i.GuildID)
+		if !b.canManage(i) || u == nil || len(parts) < 3 {
+			reply("Only members with **Manage Server** can start a raid, and the streamer must have run `/connect-twitch`.")
 			return
 		}
-		if err := b.User.StartRaid(ctx, parts[1]); err != nil {
+		if err := u.StartRaid(ctx, parts[1]); err != nil {
 			reply("Raid didn't start: " + err.Error())
 			return
 		}
@@ -264,7 +267,8 @@ func (b *Bot) onComponent(s *discordgo.Session, i *discordgo.InteractionCreate) 
 }
 
 func (b *Bot) onQueueButton(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, parts []string) {
-	if len(parts) < 3 || b.Watcher == nil {
+	w := b.watcherFor(i.GuildID)
+	if len(parts) < 3 || w == nil {
 		return
 	}
 	who := "someone"
@@ -284,12 +288,12 @@ func (b *Bot) onQueueButton(ctx context.Context, s *discordgo.Session, i *discor
 	var ok bool
 	switch parts[1] {
 	case "ok":
-		it, ok = b.Watcher.SetStatus(parts[2], "approved")
+		it, ok = w.SetStatus(parts[2], "approved")
 	case "del":
-		it, ok = b.Watcher.SetStatus(parts[2], "discarded")
+		it, ok = w.SetStatus(parts[2], "discarded")
 	case "new":
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseDeferredMessageUpdate})
-		if it, ok = b.Watcher.NewTitle(ctx, parts[2]); !ok {
+		if it, ok = w.NewTitle(ctx, parts[2]); !ok {
 			return
 		}
 		embeds, comps := queueMessage(it, "")
@@ -369,44 +373,53 @@ func (b *Bot) eachGuild(fn func(guildID string, g store.Guild)) {
 	}
 }
 
+// GoLive, Queue and Recap post to every server: a self-hosted copy that
+// follows one creator (TWITCH_CHANNEL). Hosted servers use PosterFor,
+// which posts to one server only.
 func (b *Bot) GoLive(ctx context.Context, text string) {
-	b.eachGuild(func(_ string, g store.Guild) {
-		if g.AnnounceChannel == "" {
-			return
-		}
-		msg := &discordgo.MessageSend{Content: text, AllowedMentions: &discordgo.MessageAllowedMentions{}}
-		if g.AnnounceMention != "" {
-			msg.Content = "<@&" + g.AnnounceMention + "> " + text
-			msg.AllowedMentions.Roles = []string{g.AnnounceMention}
-		}
-		if _, err := b.s.ChannelMessageSendComplex(g.AnnounceChannel, msg); err != nil {
-			slog.Warn("go-live post failed", "channel", g.AnnounceChannel, "err", err)
-		}
-	})
+	b.eachGuild(func(_ string, g store.Guild) { b.goLiveTo(g, text) })
 }
 
 func (b *Bot) Queue(ctx context.Context, it *live.QueueItem) {
-	embeds, comps := queueMessage(*it, "")
-	b.eachGuild(func(_ string, g store.Guild) {
-		if g.QueueChannel == "" {
-			return
-		}
-		if _, err := b.s.ChannelMessageSendComplex(g.QueueChannel, &discordgo.MessageSend{
-			Content: "🎬 **Chat just went wild.** New highlight to review:", Embeds: embeds, Components: comps,
-			AllowedMentions: &discordgo.MessageAllowedMentions{},
-		}); err != nil {
-			slog.Warn("clip queue post failed", "channel", g.QueueChannel, "err", err)
-		}
-	})
+	b.eachGuild(func(_ string, g store.Guild) { b.queueTo(g, it) })
 }
 
 func (b *Bot) Recap(ctx context.Context, text string) {
-	b.eachGuild(func(_ string, g store.Guild) {
-		if g.QueueChannel == "" {
-			return
-		}
-		b.s.ChannelMessageSendComplex(g.QueueChannel, &discordgo.MessageSend{Content: clip(text, 1990), AllowedMentions: &discordgo.MessageAllowedMentions{}})
-	})
+	b.eachGuild(func(_ string, g store.Guild) { b.recapTo(g, text) })
+}
+
+func (b *Bot) goLiveTo(g store.Guild, text string) {
+	if g.AnnounceChannel == "" {
+		return
+	}
+	msg := &discordgo.MessageSend{Content: text, AllowedMentions: &discordgo.MessageAllowedMentions{}}
+	if g.AnnounceMention != "" {
+		msg.Content = "<@&" + g.AnnounceMention + "> " + text
+		msg.AllowedMentions.Roles = []string{g.AnnounceMention}
+	}
+	if _, err := b.s.ChannelMessageSendComplex(g.AnnounceChannel, msg); err != nil {
+		slog.Warn("go-live post failed", "channel", g.AnnounceChannel, "err", err)
+	}
+}
+
+func (b *Bot) queueTo(g store.Guild, it *live.QueueItem) {
+	if g.QueueChannel == "" {
+		return
+	}
+	embeds, comps := queueMessage(*it, "")
+	if _, err := b.s.ChannelMessageSendComplex(g.QueueChannel, &discordgo.MessageSend{
+		Content: "🎬 **Chat just went wild.** New highlight to review:", Embeds: embeds, Components: comps,
+		AllowedMentions: &discordgo.MessageAllowedMentions{},
+	}); err != nil {
+		slog.Warn("clip queue post failed", "channel", g.QueueChannel, "err", err)
+	}
+}
+
+func (b *Bot) recapTo(g store.Guild, text string) {
+	if g.QueueChannel == "" {
+		return
+	}
+	b.s.ChannelMessageSendComplex(g.QueueChannel, &discordgo.MessageSend{Content: clip(text, 1990), AllowedMentions: &discordgo.MessageAllowedMentions{}})
 }
 
 // PostShifts sends category shift alerts to every server that asked for

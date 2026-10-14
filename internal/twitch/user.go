@@ -297,3 +297,39 @@ func (c *Client) StreamByLogin(ctx context.Context, login string) (Stream, bool,
 	}
 	return p.Data[0], true, nil
 }
+
+// StreamsByLogins returns the live streams among the given channels,
+// keyed by lowercase login; offline channels are absent. 100 per request.
+func (c *Client) StreamsByLogins(ctx context.Context, logins []string) (map[string]Stream, error) {
+	out := map[string]Stream{}
+	for start := 0; start < len(logins); start += 100 {
+		q := url.Values{"first": {"100"}}
+		for _, l := range logins[start:min(start+100, len(logins))] {
+			q.Add("user_login", strings.ToLower(l))
+		}
+		var p page[Stream]
+		if err := c.get(ctx, "/streams", q, &p); err != nil {
+			return out, err
+		}
+		for _, st := range p.Data {
+			out[strings.ToLower(st.UserLogin)] = st
+		}
+	}
+	return out, nil
+}
+
+// UserByLogin checks a channel exists and returns its display name.
+func (c *Client) UserByLogin(ctx context.Context, login string) (id, display string, err error) {
+	var p page[struct {
+		ID          string `json:"id"`
+		Login       string `json:"login"`
+		DisplayName string `json:"display_name"`
+	}]
+	if err := c.get(ctx, "/users", url.Values{"login": {strings.ToLower(login)}}, &p); err != nil {
+		return "", "", err
+	}
+	if len(p.Data) == 0 {
+		return "", "", fmt.Errorf("there's no Twitch channel called %q", login)
+	}
+	return p.Data[0].ID, p.Data[0].DisplayName, nil
+}

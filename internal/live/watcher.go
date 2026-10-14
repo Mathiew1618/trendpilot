@@ -99,6 +99,19 @@ func (w *Watcher) Poll(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	w.Observe(ctx, st, online)
+	return nil
+}
+
+// SetClipper turns clips on (or off with nil) after the creator signs in.
+func (w *Watcher) SetClipper(c Clipper) {
+	w.mu.Lock()
+	w.clipper = c
+	w.mu.Unlock()
+}
+
+// Observe applies one live/offline reading, from Poll or a batched check.
+func (w *Watcher) Observe(ctx context.Context, st twitch.Stream, online bool) {
 	w.mu.Lock()
 	switch {
 	case online && !w.live:
@@ -106,7 +119,7 @@ func (w *Watcher) Poll(ctx context.Context) error {
 		w.session, w.detector = nil, NewSurgeDetector()
 		w.mu.Unlock()
 		w.poster.GoLive(ctx, w.hype(ctx, st))
-		return nil
+		return
 	case online:
 		w.offline, w.stream = 0, st
 		w.peak = max(w.peak, st.ViewerCount)
@@ -117,11 +130,10 @@ func (w *Watcher) Poll(ctx context.Context) error {
 			recap := w.recapLocked()
 			w.mu.Unlock()
 			w.poster.Recap(ctx, recap)
-			return nil
+			return
 		}
 	}
 	w.mu.Unlock()
-	return nil
 }
 
 // RunChat reads the channel's chat and processes surges while live.
@@ -169,14 +181,17 @@ func (w *Watcher) HandleSurge(ctx context.Context, s Surge) {
 		it.Chat = append(it.Chat, m.User+": "+m.Text)
 	}
 
+	w.mu.Lock()
+	clipper := w.clipper
+	w.mu.Unlock()
 	var wg sync.WaitGroup
-	if w.clipper != nil {
+	if clipper != nil {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 			defer cancel()
-			clip, err := w.clipper.CreateClip(cctx)
+			clip, err := clipper.CreateClip(cctx)
 			it.ClipURL, it.EditURL = clip.URL, clip.EditURL
 			if it.ClipURL == "" && clip.EditURL != "" {
 				it.ClipURL = clip.EditURL
@@ -186,7 +201,7 @@ func (w *Watcher) HandleSurge(ctx context.Context, s Surge) {
 			}
 		}()
 	} else {
-		it.ClipNote = "Sign in with `trendpilot twitch-login` to get automatic clips."
+		it.ClipNote = "Connect your Twitch account (/connect-twitch) to get automatic clips."
 	}
 	if w.replay != nil {
 		wg.Add(1)

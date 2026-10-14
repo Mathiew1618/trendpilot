@@ -1,0 +1,50 @@
+[Unit]
+Description=TrendPilot Discord bot (hosted)
+Documentation=https://github.com/Mathiew1618/trendpilot
+Wants=network-online.target
+After=network-online.target tailscaled.service
+
+[Service]
+Type=simple
+User=trendpilot
+Group=trendpilot
+EnvironmentFile=/etc/trendpilot/trendpilot.env
+ExecStart=/opt/trendpilot/trendpilot run
+WorkingDirectory=/var/lib/trendpilot
+Restart=always
+RestartSec=10
+KillSignal=SIGINT
+TimeoutStopSec=20
+
+# Never compete with what else runs here.
+Nice=10
+CPUQuota=50%
+MemoryMax=96M
+MemoryHigh=80M
+TasksMax=64
+
+# Sandbox: it can only write its own data folder.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/trendpilot
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

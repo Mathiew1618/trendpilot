@@ -7,6 +7,7 @@
 Free and open source. Runs quietly in the background while you stream.</p>
 
 <p align="center">
+  <a href="https://discord.com/oauth2/authorize?client_id=1560014656339189769&scope=bot+applications.commands&permissions=3072"><b>➕ Add to Discord</b></a> ·
   <a href="https://github.com/Mathiew1618/trendpilot/releases/latest"><b>⬇️ Download</b></a> ·
   <a href="docs/SETUP.md"><b>Setup guide</b></a> ·
   <a href="#-will-it-slow-down-my-stream">Will it slow my stream?</a> ·
@@ -30,6 +31,8 @@ TrendPilot is a bot that lives in your Discord server. Ask it a question with a 
 | `/watch` | Paste a YouTube link. TrendPilot messages you when new comments come in (reply while it counts) or when the video starts taking off |
 | `/raid` | Small live channels in your game (3–30 viewers) that a raid would really help, with a **Raid** button |
 | `/clip` | Clip the last 30 seconds of your stream right now |
+
+**Setting it up for your server:** `/mychannel` (your Twitch channel), `/timezone`, `/sendhere` / `/stopsending` (where updates go), `/connect-twitch` / `/disconnect-twitch`, `/settings`, `/reset`. Setup commands are only available to members with **Manage Server**, and their replies are visible only to the person who ran them.
 
 ### It also works on its own while you stream
 
@@ -69,7 +72,26 @@ TrendPilot looks for games with **lots of viewers where a small stream can still
 
 ---
 
-## ⬇️ Get started (about 15 minutes, once)
+## 🚀 Get started
+
+There are two ways. Most people should pick the first.
+
+### Option 1: Add it to Discord (1 minute, nothing to install)
+
+1. **[Click here to add TrendPilot to your server](https://discord.com/oauth2/authorize?client_id=1560014656339189769&scope=bot+applications.commands&permissions=3072)**, choose your server, and click **Authorize**.
+2. In your server, type:
+   - `/mychannel` with your Twitch channel name, for go-live posts, highlights and raid ideas
+   - `/timezone` with your zone (`EST`, `PST`, `UK`…), so `/besttime` shows *your* hours
+   - `/sendhere` in each channel where you want updates (trend alerts, clips & highlights, go-live posts)
+3. Optional: `/connect-twitch` turns on automatic clips and 1-click Raid buttons.
+
+`/settings` shows how it's set up, and `/reset` deletes everything TrendPilot stores for your server.
+
+This bot is run by the TrendPilot project and needs no keys from you. It runs around the clock, so `/besttime` keeps learning even when your computer is off.
+
+### Option 2: Run your own copy (about 15 minutes, once)
+
+For people who want everything on their own computer.
 
 1. **Download** the file for your computer from the [Releases page](https://github.com/Mathiew1618/trendpilot/releases/latest):
 
@@ -81,10 +103,10 @@ TrendPilot looks for games with **lots of viewers where a small stream can still
    | Linux | `trendpilot_…_linux_amd64.tar.gz` |
 
 2. **Unzip it** and **double-click `trendpilot`**.
-3. **Follow the setup.** It walks you through getting four free keys (Discord, YouTube, Twitch and an AI writer), checks each one works, and gives you the link to add the bot to your server. Optional extras: your Twitch channel (for clips, go-live posts and raids) and OBS (to save replays).
-4. **In Discord, pick your channels:** type `/sendhere` in the channel where you want each kind of update.
+3. **Follow the setup.** It walks you through getting four free keys (Discord, YouTube, Twitch and an AI writer), checks each one works, and gives you the link to add *your* bot to your server.
+4. **In Discord**, use the same commands as option 1.
 
-After that, double-click TrendPilot whenever you want it running. That's it.
+After that, double-click TrendPilot whenever you want it running.
 
 > **Stuck on a step?** The [setup guide](docs/SETUP.md) goes through each one in detail.
 > **Windows says "Windows protected your PC"?** Click **More info → Run anyway**. That appears for any new app that isn't from a big publisher.
@@ -95,6 +117,8 @@ After that, double-click TrendPilot whenever you want it running. That's it.
 ## 🎮 Will it slow down my stream?
 
 **No.** TrendPilot was built for exactly this worry.
+
+**Added it to Discord (option 1)?** Then nothing runs on your computer at all. The rest of this section is about running your own copy.
 
 ### What it uses
 
@@ -125,16 +149,30 @@ Measured over 30 minutes doing everything at once: scanning the top 30 Twitch ca
 
 ## 🔒 Privacy and fair play
 
-- **Your keys stay on your computer** in a file called `trendpilot.env`. TrendPilot has no server of its own and collects nothing.
-- **The only thing saved to disk** is a small file of hourly viewer averages per game, which is how `/besttime` learns. It contains no personal data.
+**What TrendPilot stores for your server:**
+
+| Stored | Why | How to delete |
+|---|---|---|
+| Which channels get alerts, clips and go-live posts; your time zone; your Twitch channel name; muted alerts | So your settings survive restarts | `/stopsending`, or `/reset` for everything |
+| Your Twitch sign-in, only if you run `/connect-twitch` | Creating clips of *your* stream, and raids *when you press Raid* | `/disconnect-twitch` (and remove it at [twitch.tv/settings/connections](https://www.twitch.tv/settings/connections)) |
+| Hourly viewer averages per game (not per person) | How `/besttime` learns | Contains no personal data |
+
+**What it never stores:** your chat messages, who's in your chat, your viewers, or anything from your video or audio. Chat is read anonymously, the way a logged-out viewer sees it, and only the *pace* of messages is used to spot big moments.
+
+- **Running your own copy (option 2)?** Your keys stay in a file called `trendpilot.env` on your computer, and nothing leaves it except calls to Discord, Twitch, YouTube and your AI provider.
 - **TrendPilot never posts, likes or comments on social platforms for you.** Fake engagement breaks every platform's rules and can get your channel restricted. TrendPilot tells you when to act, and you do it yourself.
-- **Twitch sign-in is optional** and only asks for two permissions: making clips of *your* stream, and starting a raid *when you press Raid*. Only members with **Manage Server** can use the clip, raid and settings buttons.
-- **Chat is read anonymously**, the same way a logged-out viewer sees it, and is never stored.
+- **Raids and clips only happen for your own channel.** Twitch sign-in is checked against your `/mychannel`, and only members with **Manage Server** can press Raid or approve clips.
 - **It only suggests hashtags that fit your content.** Trending tags that don't fit are listed as skipped, because off-topic tags get posts marked as spam.
+- **Fair use of the shared AI:** on the hosted bot, `/suggest` allows one request every 20 seconds per person and 50 a day per server.
 
 ---
 
 ## ❓ Questions
+
+<details><summary><b>What's the difference between adding it and running my own?</b></summary>
+
+They do the same things. **Adding it** is instant and needs no keys, and because it runs all the time, `/besttime` has more history than a copy you only switch on while streaming. **Your own copy** keeps everything on your computer and has no shared limits, but you set up your own free keys, and `/besttime` learns from zero.
+</details>
 
 <details><summary><b>Does it cost anything?</b></summary>
 

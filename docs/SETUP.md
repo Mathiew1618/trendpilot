@@ -1,5 +1,7 @@
 # TrendPilot setup guide
 
+> **Want to skip all of this?** [Add the hosted TrendPilot to your Discord](https://discord.com/oauth2/authorize?client_id=1560014656339189769&scope=bot+applications.commands&permissions=3072) instead. It takes 1 minute, needs no keys, and nothing runs on your computer. This guide is for running **your own copy**.
+
 The setup wizard asks for four keys. This guide shows where to find each one, click by click.
 **You don't need to know how to code.** Everything here is free.
 
@@ -112,6 +114,9 @@ Type the number, paste the key, and press Enter to accept the suggested model.
 ---
 
 ## Step 6: Your Twitch channel (optional)
+
+> You can also skip this and use `/mychannel` and `/connect-twitch` in Discord later. They do the same thing.
+
 
 Type your channel name (the part after `twitch.tv/`). With this, TrendPilot can:
 

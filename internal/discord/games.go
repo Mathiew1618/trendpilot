@@ -87,7 +87,7 @@ func (b *Bot) genresCmd() string {
 	return sb.String()
 }
 
-func (b *Bot) bestTimeCmd(game string) string {
+func (b *Bot) bestTimeCmd(game, guildID string) string {
 	if b.app.Games == nil {
 		return notReady
 	}
@@ -95,13 +95,16 @@ func (b *Bot) bestTimeCmd(game string) string {
 	if !ok {
 		return fmt.Sprintf("I haven't seen %q in the top Twitch categories yet. Pick a game from /games.", game)
 	}
-	loc := b.app.Games.Loc
+	loc := b.locFor(guildID)
 	bt, ok := b.app.Games.Hist.Best(key, loc, time.Now())
 	if !ok || bt.Coverage == 0 {
 		return "No viewer history yet. Best times appear after the bot has run for a few hours, and get sharper over a week."
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "**Best times: %s** (%s; %d of 168 weekly hours sampled)\n", name, loc, bt.Coverage)
+	if b.Store != nil && b.Store.Get(guildID).TZ == "" {
+		sb.WriteString("*Not your time zone? Set it with `/timezone`.*\n")
+	}
 	if len(bt.NextDay) > 0 {
 		sb.WriteString("\n**Next 24 h, best hours to go live:**\n")
 		for _, s := range bt.NextDay {

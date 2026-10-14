@@ -93,3 +93,48 @@ func TestDeviceLoginRefreshAndClip(t *testing.T) {
 		t.Fatal("refreshed token should be saved")
 	}
 }
+
+func TestStreamsByLoginsBatches(t *testing.T) {
+	calls := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /helix/streams", func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		logins := r.URL.Query()["user_login"]
+		if len(logins) > 100 {
+			t.Errorf("%d logins in one request", len(logins))
+		}
+		if calls == 1 {
+			w.Write([]byte(`{"data":[{"user_login":"Alice","viewer_count":5}]}`))
+			return
+		}
+		w.Write([]byte(`{"data":[]}`))
+	})
+	mux.HandleFunc("GET /helix/users", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("login") == "ghost" {
+			w.Write([]byte(`{"data":[]}`))
+			return
+		}
+		w.Write([]byte(`{"data":[{"id":"7","login":"alice","display_name":"Alice"}]}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	c := New("id", "s")
+	c.Helix = srv.URL + "/helix"
+	c.token, c.expires = "app", time.Now().Add(time.Hour)
+
+	logins := make([]string, 150)
+	for i := range logins {
+		logins[i] = "user" + string(rune('a'+i%26))
+	}
+	logins[0] = "ALICE"
+	got, err := c.StreamsByLogins(context.Background(), logins)
+	if err != nil || calls != 2 || got["alice"].ViewerCount != 5 {
+		t.Fatalf("got %v calls %d err %v", got, calls, err)
+	}
+	if id, name, err := c.UserByLogin(context.Background(), "alice"); err != nil || id != "7" || name != "Alice" {
+		t.Fatal(id, name, err)
+	}
+	if _, _, err := c.UserByLogin(context.Background(), "ghost"); err == nil {
+		t.Fatal("missing channel should error")
+	}
+}

@@ -309,6 +309,34 @@ func run(ctx context.Context) error {
 		}
 		slog.Info("following your stream", "channel", channel, "clips", clipper != nil, "obs", replay != nil)
 	}
+	// Hosted: every Discord server can follow its own creator (/mychannel).
+	if bot != nil && tw != nil {
+		writer := newLLM()
+		trendsFn := func() []trends.Trend {
+			tctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			ts, _ := a.Trends(tctx, "", "")
+			return ts
+		}
+		mgr := live.NewManager(ctx, tw, func(guildID, channel string) *live.Watcher {
+			w := live.NewWatcher(channel, tw, bot.PosterFor(guildID), writer, nil, nil, trendsFn)
+			if u := bot.UserFor(guildID); u != nil && u.HasScope("clips:edit") {
+				if _, login := u.User(); strings.EqualFold(login, channel) {
+					w.SetClipper(u)
+				}
+			}
+			return w
+		})
+		bot.Live, bot.Twitch, bot.TokenDir = mgr, tw, filepath.Join(configDir(), "twitch-users")
+		bot.SetSuggestLimit(20*time.Second, envInt("TRENDPILOT_SUGGEST_PER_DAY", 50))
+		settings.Each(func(guildID string, g store.Guild) {
+			if g.TwitchChannel != "" {
+				mgr.Set(guildID, g.TwitchChannel)
+			}
+		})
+		sched.Add(jobs.Job{Name: "creator-streams", Every: time.Minute, Delay: 4 * time.Second, Run: mgr.PollAll})
+		slog.Info("per-server creators on", "following", mgr.Len())
+	}
 	sched.Add(jobs.Job{Name: "usage-report", Every: time.Hour, Delay: time.Hour, Run: logUsage})
 	sched.Start(ctx)
 

@@ -36,6 +36,14 @@ Game scan job ─► category shifts (genre ±30%, game +50%/−40%, new entrant
 /raid ─► small live channels (3–30 viewers, live 20+ min) ─► [Raid] (creator sign-in, Manage Server)
 ```
 
+**Hosted mode.** One instance serves many Discord servers. `live.Manager` keeps one
+`Watcher` per server (from `/mychannel`), polls all of them in one batched
+`StreamsByLogins` call per minute, and gives each a `PosterFor(guildID)` so posts never cross
+servers. Per-server Twitch sign-ins are made from Discord with the device-code flow
+(`/connect-twitch`) and are only accepted when the signed-in login matches `/mychannel`.
+`/suggest` is rate-limited per person and per server; `llm.Client` allows 2 calls at once.
+See [HOSTING.md](HOSTING.md).
+
 Background work runs on `internal/jobs` (per-job goroutine, jitter, panic recovery);
 `GET /api/jobs` shows each job's last run and error. Per-server channel choices live in
 `settings.json`, the creator's Twitch token in `twitch-user.json` (0600), both in the

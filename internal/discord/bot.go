@@ -26,9 +26,21 @@ type Bot struct {
 	guild string // "" registers commands globally (can take up to an hour to appear)
 
 	// Optional, set by main before Run.
-	Store   *store.Store     // per-server channel settings
-	Watcher *live.Watcher    // the creator's own stream (TWITCH_CHANNEL)
-	User    *twitch.UserAuth // the creator's Twitch sign-in (clips, raids)
+	Store    *store.Store     // per-server settings
+	Live     *live.Manager    // per-server creators (/mychannel)
+	Twitch   *twitch.Client   // channel checks and in-Discord sign-in
+	TokenDir string           // where per-server Twitch sign-ins are saved
+	Watcher  *live.Watcher    // self-hosted: the one creator in TWITCH_CHANNEL
+	User     *twitch.UserAuth // self-hosted: that creator's sign-in
+
+	users userCache
+	limit *limiter
+}
+
+// SetSuggestLimit sets the /suggest cooldown per person and the daily
+// allowance per server (0 = unlimited).
+func (b *Bot) SetSuggestLimit(cooldown time.Duration, daily int) {
+	b.limit = newLimiter(cooldown, daily)
 }
 
 func New(token, guildID string, a *app.App) (*Bot, error) {
@@ -37,7 +49,8 @@ func New(token, guildID string, a *app.App) (*Bot, error) {
 		return nil, err
 	}
 	s.Identify.Intents = discordgo.IntentsGuilds
-	b := &Bot{s: s, app: a, guild: guildID}
+	b := &Bot{s: s, app: a, guild: guildID, limit: newLimiter(20*time.Second, 50),
+		users: userCache{byGuild: map[string]*twitch.UserAuth{}, pending: map[string]bool{}}}
 	s.AddHandler(b.onInteraction)
 	return b, nil
 }
@@ -100,7 +113,8 @@ func (b *Bot) Run(ctx context.Context) error {
 func allCommands() []*discordgo.ApplicationCommand {
 	all := append([]*discordgo.ApplicationCommand{}, commands...)
 	all = append(all, gameCommands...)
-	return append(all, actionCommands...)
+	all = append(all, actionCommands...)
+	return append(all, hostedCommands...)
 }
 
 func (b *Bot) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -118,7 +132,11 @@ func (b *Bot) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 	}
 
 	// Trend fetches and LLM calls can exceed Discord's 3 s reply window.
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseDeferredChannelMessageWithSource})
+	deferred := &discordgo.InteractionResponse{Type: discordgo.InteractionResponseDeferredChannelMessageWithSource}
+	if privateCommands[data.Name] {
+		deferred.Data = &discordgo.InteractionResponseData{Flags: discordgo.MessageFlagsEphemeral}
+	}
+	s.InteractionRespond(i.Interaction, deferred)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
@@ -128,7 +146,11 @@ func (b *Bot) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 	case "trends":
 		out = b.trends(ctx, strings.ToUpper(opt["region"]), opt["category"])
 	case "suggest":
-		out = b.suggest(ctx, opt)
+		if ok, why := b.limit.Allow(i.GuildID, userID(i), time.Now()); !ok {
+			out = why
+		} else {
+			out = b.suggest(ctx, opt)
+		}
 	case "watch":
 		out = b.watch(opt["video"], i.ChannelID)
 	case "unwatch":
@@ -140,10 +162,12 @@ func (b *Bot) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 		comps = b.gamesButtons(opt["genre"])
 	case "sendhere", "stopsending", "raid", "clip":
 		out, comps = b.action(ctx, i, data.Name, opt)
+	case "mychannel", "connect-twitch", "disconnect-twitch", "timezone", "settings", "reset":
+		out = b.hostedAction(ctx, i, data.Name, opt)
 	case "genres":
 		out = b.genresCmd()
 	case "besttime":
-		out = b.bestTimeCmd(opt["game"])
+		out = b.bestTimeCmd(opt["game"], i.GuildID)
 	case "viewers":
 		out = b.viewersCmd()
 	default:
@@ -263,4 +287,14 @@ func first(xs []string) string {
 		return ""
 	}
 	return xs[0]
+}
+
+func userID(i *discordgo.InteractionCreate) string {
+	switch {
+	case i.Member != nil && i.Member.User != nil:
+		return i.Member.User.ID
+	case i.User != nil:
+		return i.User.ID
+	}
+	return ""
 }

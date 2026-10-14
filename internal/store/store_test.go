@@ -26,3 +26,17 @@ func TestPersistAndMute(t *testing.T) {
 		t.Fatal("Get leaked internal map")
 	}
 }
+
+func TestDelete(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "settings.json")
+	s := Open(p)
+	s.Update("g1", func(g *Guild) { g.TwitchChannel, g.TZ = "creator", "Europe/London" })
+	s.Update("g2", func(g *Guild) { g.TZ = "UTC" })
+	if err := s.Delete("g1"); err != nil {
+		t.Fatal(err)
+	}
+	r := Open(p)
+	if r.Get("g1").TwitchChannel != "" || r.Get("g2").TZ != "UTC" {
+		t.Fatalf("after delete: %+v", r.Guilds)
+	}
+}
