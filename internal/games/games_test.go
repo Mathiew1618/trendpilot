@@ -106,7 +106,7 @@ func TestScanScoresGrowthGenresAndMentions(t *testing.T) {
 	if len(ops) != 3 || ops[0].Name != "Hollow Knight: Silksong" {
 		t.Fatalf("opportunities %+v", ops)
 	}
-	if got := s.Opportunities("shoot"); len(got) != 1 || got[0].Name != "Fortnite" {
+	if got := s.Opportunities("shoot"); len(got) != 2 || got[0].Name != "Fortnite" || got[1].Name != "Counter-Strike" {
 		t.Fatalf("genre filter %+v", got)
 	}
 
