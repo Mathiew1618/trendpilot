@@ -28,7 +28,7 @@ jobs:
             exe=trendpilot; [ "$os" = windows ] && exe=trendpilot.exe
             CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath \
               -ldflags "-s -w -X main.version=$VERSION" -o "build/$name/$exe" ./cmd/trendpilot
-            cp docs/SETUP.md "build/$name/"
+            cp docs/SETUP.md LICENSE "build/$name/"
             # A double-clickable way to re-run the setup wizard.
             if [ "$os" = windows ]; then
               printf '@echo off\r\ncd /d "%%~dp0"\r\ntrendpilot.exe setup\r\npause\r\n' > "build/$name/Change settings.bat"
