@@ -54,6 +54,12 @@ func (b *countingBody) Read(p []byte) (int, error) {
 
 func (b *countingBody) Close() error { return b.r.Close() }
 
+// Count records traffic that doesn't go through HTTP (Twitch chat).
+func Count(down, up int64) {
+	received.Add(down)
+	sent.Add(up)
+}
+
 // Limit caps the process: at most cpus OS threads running Go code at once
 // and a soft memory ceiling. It also lowers the process priority where the
 // OS allows it.

@@ -12,6 +12,8 @@ import (
 	"net"
 	"strings"
 	"time"
+
+	"trendpilot/internal/usage"
 )
 
 type ChatMessage struct {
@@ -69,7 +71,7 @@ func readChatOnce(ctx context.Context, channel string, out chan<- ChatMessage) e
 	nick := fmt.Sprintf("justinfan%d", 10000+rand.Intn(80000))
 	fmt.Fprintf(conn, "CAP REQ :twitch.tv/tags\r\nNICK %s\r\nJOIN #%s\r\n", nick, channel)
 
-	r := bufio.NewReaderSize(conn, 16<<10)
+	r := bufio.NewReaderSize(countingConn{conn}, 16<<10)
 	for {
 		// Twitch PINGs about every 5 minutes; silence for longer means a dead link.
 		conn.SetReadDeadline(time.Now().Add(7 * time.Minute))
@@ -90,6 +92,15 @@ func readChatOnce(ctx context.Context, channel string, out chan<- ChatMessage) e
 			}
 		}
 	}
+}
+
+// countingConn adds chat traffic to TrendPilot's usage report.
+type countingConn struct{ net.Conn }
+
+func (c countingConn) Read(p []byte) (int, error) {
+	n, err := c.Conn.Read(p)
+	usage.Count(int64(n), 0)
+	return n, err
 }
 
 // ParsePrivmsg extracts the sender and text from a tagged IRC PRIVMSG.
