@@ -148,7 +148,7 @@ func setupCmd(ctx context.Context) error {
     4) Ollama            free, runs on this computer (https://ollama.com)
     5) Skip`)
 	providers := map[string][3]string{ // base URL, default model, key label
-		"1": {"https://api.groq.com/openai/v1", "llama-3.3-70b-versatile", "Groq API key"},
+		"1": {"https://api.groq.com/openai/v1", "openai/gpt-oss-120b", "Groq API key"},
 		"2": {"https://openrouter.ai/api/v1", "meta-llama/llama-3.3-70b-instruct", "OpenRouter API key"},
 		"3": {"https://api.openai.com/v1", "gpt-4o-mini", "OpenAI API key"},
 		"4": {"http://localhost:11434/v1", "llama3.1", ""},
