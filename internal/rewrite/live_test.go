@@ -20,7 +20,11 @@ func TestLiveSuggest(t *testing.T) {
 	if k := os.Getenv("TRENDPILOT_LLM_API_KEY"); k != "" {
 		tok = llm.StaticToken(k)
 	}
-	c := llm.New("https://inference-api.nousresearch.com/v1", "upstage/solar-mini4:free", tok)
+	base, model := os.Getenv("TRENDPILOT_LLM_BASE_URL"), os.Getenv("TRENDPILOT_LLM_MODEL")
+	if base == "" {
+		base, model = "https://inference-api.nousresearch.com/v1", "upstage/solar-mini4:free"
+	}
+	c := llm.New(base, model, tok)
 	ts := []trends.Trend{
 		{Term: "#HalloweenCostume", Key: "halloweencostume", Score: 30, Growth: 0.8, Crowding: 0.1, Examples: []string{"DIY costume in 10 minutes"}},
 		{Term: "#NFL", Key: "nfl", Score: 25, Growth: 0.1, Crowding: 0.3, Examples: []string{"Week 6 highlights"}},
