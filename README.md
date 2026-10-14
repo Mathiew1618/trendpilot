@@ -99,7 +99,7 @@ After that, double-click TrendPilot whenever you want it running. That's it.
 ### What it uses
 
 <!-- METRICS:START -->
-Measured over 30 minutes doing everything at once: scanning the top 30 Twitch categories and YouTube's trending charts every 10 minutes, following **one of Twitch's busiest live chats** (a worst case; your chat will be quieter), and tracking a YouTube video. Numbers come from the operating system, sampled every 2 seconds.
+Measured over 30 minutes doing everything at once: scanning the top 30 Twitch categories and YouTube's trending charts every 10 minutes, following **one of Twitch's busiest live chats** (a worst case; your chat will be quieter), and tracking a YouTube video. CPU and memory were measured by the operating system every 2 seconds; data use by TrendPilot's built-in counter.
 
 | | TrendPilot | What that means |
 |---|---|---|
