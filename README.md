@@ -14,6 +14,8 @@ Free and open source. Runs quietly in the background while you stream.</p>
   <a href="#-questions">Questions</a>
 </p>
 
+> **New in v0.2.0:** add TrendPilot to Discord in one minute, with no download and no keys. Plus Twitch sign-in from inside Discord, per-server time zones, `/settings` and `/reset`. [See what changed](CHANGELOG.md).
+
 ---
 
 ## What it does
