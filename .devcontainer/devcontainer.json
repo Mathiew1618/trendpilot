@@ -1,13 +1,34 @@
 {
   "name": "TrendPilot",
   "image": "mcr.microsoft.com/devcontainers/go:1-1.22-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/sshd:1": {
+      "version": "latest"
+    }
+  },
   "postCreateCommand": "go mod download && go build -o /tmp/trendpilot ./cmd/trendpilot",
   "secrets": {
-    "YOUTUBE_API_KEY": { "description": "YouTube Data API v3 key (docs/SETUP.md step 2)" },
-    "TWITCH_CLIENT_ID": { "description": "Twitch app Client ID (docs/SETUP.md step 3)" },
-    "TWITCH_CLIENT_SECRET": { "description": "Twitch app Client Secret" },
-    "DISCORD_BOT_TOKEN": { "description": "Optional: Discord bot token for end-to-end tests" },
-    "TRENDPILOT_LLM_API_KEY": { "description": "Optional: OpenAI-compatible API key for /suggest" }
+    "YOUTUBE_API_KEY": {
+      "description": "YouTube Data API v3 key (docs/SETUP.md step 2)"
+    },
+    "TWITCH_CLIENT_ID": {
+      "description": "Twitch app Client ID (docs/SETUP.md step 3)"
+    },
+    "TWITCH_CLIENT_SECRET": {
+      "description": "Twitch app Client Secret"
+    },
+    "DISCORD_BOT_TOKEN": {
+      "description": "Optional: Discord bot token for end-to-end tests"
+    },
+    "TRENDPILOT_LLM_API_KEY": {
+      "description": "Optional: OpenAI-compatible API key for /suggest"
+    }
   },
-  "customizations": { "vscode": { "extensions": ["golang.go"] } }
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "golang.go"
+      ]
+    }
+  }
 }
