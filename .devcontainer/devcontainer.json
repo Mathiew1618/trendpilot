@@ -1,7 +1,10 @@
 {
   "name": "TrendPilot",
-  "image": "mcr.microsoft.com/devcontainers/go:1-1.22-bookworm",
+  "image": "mcr.microsoft.com/devcontainers/base:bookworm",
   "features": {
+    "ghcr.io/devcontainers/features/go:1": {
+      "version": "1.22"
+    },
     "ghcr.io/devcontainers/features/sshd:1": {
       "version": "latest"
     }
