@@ -12,8 +12,11 @@ import (
 	"github.com/bwmarrin/discordgo"
 
 	"trendpilot/internal/app"
+	"trendpilot/internal/live"
 	"trendpilot/internal/monitor"
 	"trendpilot/internal/rewrite"
+	"trendpilot/internal/store"
+	"trendpilot/internal/twitch"
 	"trendpilot/internal/youtube"
 )
 
@@ -21,6 +24,11 @@ type Bot struct {
 	s     *discordgo.Session
 	app   *app.App
 	guild string // "" registers commands globally (can take up to an hour to appear)
+
+	// Optional, set by main before Run.
+	Store   *store.Store     // per-server channel settings
+	Watcher *live.Watcher    // the creator's own stream (TWITCH_CHANNEL)
+	User    *twitch.UserAuth // the creator's Twitch sign-in (clips, raids)
 }
 
 func New(token, guildID string, a *app.App) (*Bot, error) {
@@ -81,7 +89,7 @@ func (b *Bot) Run(ctx context.Context) error {
 		return fmt.Errorf("discord connect: %w", err)
 	}
 	defer b.s.Close()
-	if _, err := b.s.ApplicationCommandBulkOverwrite(b.s.State.User.ID, b.guild, append(commands, gameCommands...)); err != nil {
+	if _, err := b.s.ApplicationCommandBulkOverwrite(b.s.State.User.ID, b.guild, allCommands()); err != nil {
 		return fmt.Errorf("discord register commands: %w", err)
 	}
 	slog.Info("discord bot online", "user", b.s.State.User.Username, "guild", b.guild)
@@ -89,14 +97,24 @@ func (b *Bot) Run(ctx context.Context) error {
 	return nil
 }
 
+func allCommands() []*discordgo.ApplicationCommand {
+	all := append([]*discordgo.ApplicationCommand{}, commands...)
+	all = append(all, gameCommands...)
+	return append(all, actionCommands...)
+}
+
 func (b *Bot) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Type == discordgo.InteractionMessageComponent {
+		b.onComponent(s, i)
+		return
+	}
 	if i.Type != discordgo.InteractionApplicationCommand {
 		return
 	}
 	data := i.ApplicationCommandData()
 	opt := map[string]string{}
 	for _, o := range data.Options {
-		opt[o.Name] = o.StringValue()
+		opt[o.Name] = fmt.Sprint(o.Value) // StringValue panics on number options
 	}
 
 	// Trend fetches and LLM calls can exceed Discord's 3 s reply window.
@@ -105,6 +123,7 @@ func (b *Bot) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 	defer cancel()
 
 	var out string
+	var comps []discordgo.MessageComponent
 	switch data.Name {
 	case "trends":
 		out = b.trends(ctx, strings.ToUpper(opt["region"]), opt["category"])
@@ -118,6 +137,9 @@ func (b *Bot) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 		out = b.watching(i.ChannelID)
 	case "games":
 		out = b.gamesCmd(opt["genre"])
+		comps = b.gamesButtons(opt["genre"])
+	case "sendhere", "stopsending", "raid", "clip":
+		out, comps = b.action(ctx, i, data.Name, opt)
 	case "genres":
 		out = b.genresCmd()
 	case "besttime":
@@ -127,10 +149,12 @@ func (b *Bot) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 	default:
 		out = "Unknown command."
 	}
-	if len(out) > 1990 {
-		out = out[:1990] + "…"
+	out = clip(out, 1990)
+	edit := &discordgo.WebhookEdit{Content: &out}
+	if len(comps) > 0 {
+		edit.Components = &comps
 	}
-	if _, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{Content: &out}); err != nil {
+	if _, err := s.InteractionResponseEdit(i.Interaction, edit); err != nil {
 		slog.Warn("discord reply failed", "cmd", data.Name, "err", err)
 	}
 }

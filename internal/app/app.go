@@ -4,7 +4,6 @@ package app
 
 import (
 	"context"
-	"log/slog"
 	"time"
 
 	"trendpilot/internal/cache"
@@ -64,21 +63,11 @@ func (a *App) Suggest(ctx context.Context, d rewrite.Draft, region string) (rewr
 	return a.Rewriter.Suggest(ctx, d, ts)
 }
 
-// Refresh keeps the default region's snapshot warm so growth is measured
-// on a steady cadence, not only when someone asks.
-func (a *App) Refresh(ctx context.Context) {
-	t := time.NewTicker(TrendTTL)
-	defer t.Stop()
-	for {
-		a.snaps.Delete(a.Region + "|")
-		if _, err := a.Trends(ctx, a.Region, ""); err != nil && ctx.Err() == nil {
-			slog.Warn("trend refresh failed", "region", a.Region, "err", err)
-		}
-		a.snaps.Sweep()
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-		}
-	}
+// RefreshOnce re-fetches the default region's chart so growth is measured
+// on a steady cadence, not only when someone asks. Run it every TrendTTL.
+func (a *App) RefreshOnce(ctx context.Context) error {
+	a.snaps.Delete(a.Region + "|")
+	_, err := a.Trends(ctx, a.Region, "")
+	a.snaps.Sweep()
+	return err
 }

@@ -13,6 +13,7 @@ import (
 type fakeTwitch struct {
 	viewers    map[string][]int // game id -> per-stream viewer counts
 	genreCalls int
+	pages      int
 }
 
 func (f *fakeTwitch) TopGames(ctx context.Context, n int) ([]twitch.Game, error) {

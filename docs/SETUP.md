@@ -13,8 +13,11 @@ The setup wizard asks for four keys. This guide shows where to find each one, cl
 4. [Twitch app](#step-3-twitch-app): which games are trending, best times to stream
 5. [AI writer](#step-4-ai-writer): caption and hashtag ideas
 6. [Region and time zone](#step-5-region-and-time-zone)
-7. [Add the bot to your server](#last-step-add-the-bot-to-your-server)
-8. [Troubleshooting](#troubleshooting)
+7. [Your Twitch channel](#step-6-your-twitch-channel-optional): go-live posts, clips, raids
+8. [OBS](#step-7-obs-optional): save a replay when chat goes wild
+9. [Add the bot to your server](#last-step-add-the-bot-to-your-server)
+10. [Choose where updates go](#choose-where-updates-go)
+11. [Troubleshooting](#troubleshooting)
 
 You can skip any step by pressing **Enter**. TrendPilot works with whatever you set up. To add or change keys later, double-click
 **Change settings** in the TrendPilot folder.
@@ -108,6 +111,36 @@ Type the number, paste the key, and press Enter to accept the suggested model.
 
 ---
 
+## Step 6: Your Twitch channel (optional)
+
+Type your channel name (the part after `twitch.tv/`). With this, TrendPilot can:
+
+- post a go-live announcement when you start streaming,
+- notice when your chat explodes and queue the moment as a highlight,
+- suggest raid targets in the game you're playing.
+
+It then asks: **"Sign in to Twitch so TrendPilot can make clips and raid with one click?"** Type `y` if you want that:
+
+1. A link (`twitch.tv/activate`) and a short code appear.
+2. Open the link, check the code matches, and click **Authorize**.
+
+TrendPilot only asks for two permissions: *create clips* of your stream and *start raids* (only when you press Raid). You can sign in later with `trendpilot twitch-login`, or remove access any time at **twitch.tv → Settings → Connections**.
+
+---
+
+## Step 7: OBS (optional)
+
+If you use OBS's **Replay Buffer**, TrendPilot can save it automatically at each highlight, giving you a full-quality copy of the moment for editing.
+
+1. In OBS, open **Tools → WebSocket Server Settings**.
+2. Tick **Enable WebSocket server**, click **Show Connect Info**, and copy the **Server Password**.
+3. Paste it into TrendPilot.
+4. Make sure the replay buffer is on: **Settings → Output → Replay Buffer → Enable Replay Buffer**, then click **Start Replay Buffer** in OBS's controls.
+
+If OBS isn't open during setup, TrendPilot saves the password anyway and connects when it needs to.
+
+---
+
 ## Last step: add the bot to your server
 
 At the end, TrendPilot prints a link that starts with `https://discord.com/oauth2/authorize`.
@@ -118,6 +151,21 @@ At the end, TrendPilot prints a link that starts with `https://discord.com/oauth
 Now double-click TrendPilot again. Its window shows `discord bot online`. In Discord, type `/` and the TrendPilot commands appear.
 
 > **Commands not showing?** New bots can take a few minutes to appear everywhere. For instant setup: in Discord turn on *User Settings → Advanced → Developer Mode*, right-click your server icon → **Copy Server ID**, and add it to `trendpilot.env` as `DISCORD_GUILD_ID=...`. Then restart TrendPilot.
+
+---
+
+## Choose where updates go
+
+In Discord, go to the channel where you want each kind of update and type:
+
+| Type this | And TrendPilot posts there |
+|---|---|
+| `/sendhere what:Trend alerts` | Genres and games spiking or dropping on Twitch |
+| `/sendhere what:Clips & highlights` | Chat-surge clips with **Approve / New title / Discard** buttons, and your end-of-stream recap |
+| `/sendhere what:Go-live announcements ping:@Role` | A fresh announcement every time you go live (leave out `ping` for no ping) |
+
+Use a private channel for clips if you want to review them before your community sees them. `/stopsending` turns any of these off.
+Only members with **Manage Server** can use these commands.
 
 ---
 
@@ -140,6 +188,9 @@ Now double-click TrendPilot again. Its window shows `discord bot online`. In Dis
 | `twitch auth: HTTP 403` / `invalid client secret` | Make a **New Secret** in the Twitch console and paste it again. |
 | `First scan of Twitch is still running` | Wait a minute after starting. The first scan takes about 10–20 seconds. |
 | `/besttime` says no history yet | Normal on the first day. It needs a few hours of running. |
+| Highlights arrive without a clip | Run `trendpilot twitch-login`, and check clips are allowed on your channel (Creator Dashboard → Settings → Stream → Clips). |
+| No go-live post | Check `/sendhere what:Go-live announcements` was run, and `TWITCH_CHANNEL` is set (run setup again). |
+| "Couldn't reach OBS" | Open OBS and check **Tools → WebSocket Server Settings → Enable WebSocket server** is ticked. |
 | Mac: "cannot be opened because the developer cannot be verified" | **System Settings → Privacy & Security** → scroll down → **Open Anyway**. |
 | Windows: "Windows protected your PC" | Click **More info → Run anyway**. |
 

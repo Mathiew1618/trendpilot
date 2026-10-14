@@ -26,7 +26,20 @@ creator's draft ───────► rewrite    LLM: captions + hashtags, of
 watched videos ────────► monitor    alerts on new comments / breakout, per Discord channel
                             │
           Discord slash commands · local JSON API (127.0.0.1:8790) · CLI
+
+Creator's stream (TWITCH_CHANNEL)
+  stream-status job (1/min) ─► go-live post (LLM, mentions stripped) · recap on 2 offline polls
+  anonymous IRC chat ─► surge detector (20 s window vs EWMA, hype words weigh more)
+        └─► clip (Helix, creator sign-in) + OBS SaveReplayBuffer + LLM title ─► Discord queue
+            [Approve] [New title] [Discard]
+Game scan job ─► category shifts (genre ±30%, game +50%/−40%, new entrants) ─► alerts [Mute 24h]
+/raid ─► small live channels (3–30 viewers, live 20+ min) ─► [Raid] (creator sign-in, Manage Server)
 ```
+
+Background work runs on `internal/jobs` (per-job goroutine, jitter, panic recovery);
+`GET /api/jobs` shows each job's last run and error. Per-server channel choices live in
+`settings.json`, the creator's Twitch token in `twitch-user.json` (0600), both in the
+user config dir.
 
 - **Opportunity** (games) = viewers ÷ (viewers of the #25 stream + 1) × growth boost. A big
   audience whose directory first screens a small stream can still reach.
@@ -57,6 +70,10 @@ and the hourly `usage` log line report CPU %, memory and MB/hour.
 | `internal/server` | local JSON API |
 | `internal/usage` | byte counting, CPU/memory report, priority and limits |
 | `internal/cache` | generic TTL cache |
+| `internal/jobs` | background job scheduler |
+| `internal/live` | creator's stream: chat reader, surge detector, go-live/recap, highlight queue |
+| `internal/obs` | OBS WebSocket v5 client (replay buffer) |
+| `internal/store` | per-Discord-server settings (JSON) |
 
 ## Releasing
 

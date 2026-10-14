@@ -28,6 +28,21 @@ TrendPilot is a bot that lives in your Discord server. Ask it a question with a 
 | `/trends` | Hashtags and topics trending on YouTube that are still early (rising, not yet crowded) |
 | `/suggest` | Paste your title or caption and get 3 better versions plus hashtags that fit current trends |
 | `/watch` | Paste a YouTube link. TrendPilot messages you when new comments come in (reply while it counts) or when the video starts taking off |
+| `/raid` | Small live channels in your game (3–30 viewers) that a raid would really help, with a **Raid** button |
+| `/clip` | Clip the last 30 seconds of your stream right now |
+
+### It also works on its own while you stream
+
+You don't have to ask. Pick a channel for each update with `/sendhere`, and TrendPilot posts by itself:
+
+| Update | What lands in Discord |
+|---|---|
+| **Trend alerts** | *"📈 **Horror** spiked **+250%** in the last 20 min (4k → 14k viewers)."* Spot a wave while it's starting. Each alert has a **Mute 24h** button. |
+| **Go-live announcements** | A fresh, AI-written announcement every time you go live, instead of the same `@everyone` text every day. You choose which role gets pinged, if any. |
+| **Clips & highlights** | When your chat suddenly explodes (*"CLIP IT"*, *"NO WAY"*, *"LUL"*), TrendPilot clips the moment on Twitch, saves your OBS replay buffer if you use one, writes a short-form title and hashtags, and posts it for you to **Approve**, ask for a **New title**, or **Discard**. Approved ones come with the title and hashtags ready to copy into TikTok, Shorts or Reels. |
+| **Stream recap** | When you end the stream: how long you streamed, your peak viewers, and every highlight with its timestamp. |
+
+Nothing is posted to TikTok, YouTube or anywhere else without you. You approve every clip, and raids only start when you press the button.
 
 <details>
 <summary><b>Example: <code>/games</code></b></summary>
@@ -66,7 +81,8 @@ TrendPilot looks for games with **lots of viewers where a small stream can still
    | Linux | `trendpilot_…_linux_amd64.tar.gz` |
 
 2. **Unzip it** and **double-click `trendpilot`**.
-3. **Follow the setup.** It walks you through getting four free keys (Discord, YouTube, Twitch and an AI writer), checks each one works, and gives you the link to add the bot to your server.
+3. **Follow the setup.** It walks you through getting four free keys (Discord, YouTube, Twitch and an AI writer), checks each one works, and gives you the link to add the bot to your server. Optional extras: your Twitch channel (for clips, go-live posts and raids) and OBS (to save replays).
+4. **In Discord, pick your channels:** type `/sendhere` in the channel where you want each kind of update.
 
 After that, double-click TrendPilot whenever you want it running. That's it.
 
@@ -92,7 +108,7 @@ _Measured numbers are being collected and will appear here._
 - **It's limited to one CPU core**, even on a 16-core machine.
 - **It has a memory ceiling of 150 MB**, less than a single browser tab.
 - **It mostly sleeps.** It wakes up every few minutes, makes a handful of small requests, and goes back to sleep.
-- **It doesn't touch your stream.** It never reads your video, your audio or OBS, and it doesn't upload anything big.
+- **It doesn't touch your stream.** It never reads your video or audio and never uploads anything big. Chat is read as plain text. If you connect OBS, TrendPilot only sends it one tiny "save replay" message when chat surges, and only connects for that moment.
 - **You can check it yourself.** It writes its own CPU, memory and data use to its window every hour.
 
 ---
@@ -101,7 +117,9 @@ _Measured numbers are being collected and will appear here._
 
 - **Your keys stay on your computer** in a file called `trendpilot.env`. TrendPilot has no server of its own and collects nothing.
 - **The only thing saved to disk** is a small file of hourly viewer averages per game, which is how `/besttime` learns. It contains no personal data.
-- **TrendPilot never posts, likes or comments for you.** Fake engagement breaks every platform's rules and can get your channel restricted. TrendPilot tells you when to act, and you do it yourself.
+- **TrendPilot never posts, likes or comments on social platforms for you.** Fake engagement breaks every platform's rules and can get your channel restricted. TrendPilot tells you when to act, and you do it yourself.
+- **Twitch sign-in is optional** and only asks for two permissions: making clips of *your* stream, and starting a raid *when you press Raid*. Only members with **Manage Server** can use the clip, raid and settings buttons.
+- **Chat is read anonymously**, the same way a logged-out viewer sees it, and is never stored.
 - **It only suggests hashtags that fit your content.** Trending tags that don't fit are listed as skipped, because off-topic tags get posts marked as spam.
 
 ---
@@ -131,6 +149,11 @@ Twitch doesn't publish viewer history, so TrendPilot builds its own by checking 
 <details><summary><b>Can my mods use it?</b></summary>
 
 Yes. Anyone in your Discord server can use the commands. Alerts from `/watch` go to the channel where it was run.
+</details>
+
+<details><summary><b>Why didn't a big moment get clipped?</b></summary>
+
+TrendPilot clips when chat moves much faster than usual, so it learns your chat's normal pace during the first couple of minutes of each stream. Clips also need you to have signed in to Twitch during setup (or run `trendpilot twitch-login` later), and clips must be enabled on your channel. You can always use `/clip` yourself.
 </details>
 
 <details><summary><b>How do I stop it?</b></summary>

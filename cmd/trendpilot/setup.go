@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"trendpilot/internal/llm"
+	"trendpilot/internal/obs"
 	"trendpilot/internal/twitch"
 	"trendpilot/internal/youtube"
 )
@@ -61,7 +62,7 @@ func ok(msg string)   { fmt.Println("  ✅ " + msg) }
 func warn(msg string) { fmt.Println("  ⚠️  " + msg) }
 
 func section(n int, title string) {
-	fmt.Printf("\n━━━ Step %d of 5: %s ━━━\n", n, title)
+	fmt.Printf("\n━━━ Step %d of 7: %s ━━━\n", n, title)
 }
 
 func setupCmd(ctx context.Context) error {
@@ -206,6 +207,38 @@ func setupCmd(ctx context.Context) error {
 	}
 	w.vals["TRENDPILOT_TZ"] = tz
 
+	// 6. The creator's own channel
+	section(6, "Your Twitch channel (go-live posts, clips, raid suggestions)")
+	fmt.Println(`  Optional. TrendPilot reads your chat (read-only) to spot big moments,
+  and checks when you go live.`)
+	if ch := w.ask(fmt.Sprintf("  Your Twitch channel name [Enter for %s]: ", or(w.vals["TWITCH_CHANNEL"], "skip"))); ch != "" {
+		w.vals["TWITCH_CHANNEL"] = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(ch), "@"))
+	}
+	if w.vals["TWITCH_CHANNEL"] != "" && w.vals["TWITCH_CLIENT_ID"] != "" && w.vals["TWITCH_CLIENT_SECRET"] != "" {
+		ans := strings.ToLower(w.ask("  Sign in to Twitch so TrendPilot can make clips and raid with one click? (y/N): "))
+		if strings.HasPrefix(ans, "y") {
+			os.Setenv("TWITCH_CLIENT_ID", w.vals["TWITCH_CLIENT_ID"])
+			os.Setenv("TWITCH_CLIENT_SECRET", w.vals["TWITCH_CLIENT_SECRET"])
+			if err := twitchLoginCmd(ctx); err != nil {
+				warn("Sign-in didn't finish (" + err.Error() + "). You can do it later with: trendpilot twitch-login")
+			}
+		}
+	}
+
+	// 7. OBS
+	section(7, "OBS (optional: save a replay when chat goes wild)")
+	fmt.Println(`  In OBS: Tools → WebSocket Server Settings → tick "Enable WebSocket server"
+  → click "Show Connect Info" → copy the Server Password.
+  For the replay to be saved, turn on Settings → Output → Replay Buffer.`)
+	if pw := w.askKey("OBS_WEBSOCKET_PASSWORD", "OBS WebSocket password"); pw != "" {
+		c := &obs.Client{Addr: w.vals["OBS_WEBSOCKET_ADDR"], Password: pw}
+		if _, err := c.Request(ctx, "GetVersion", nil); err != nil {
+			warn("Couldn't reach OBS right now (" + err.Error() + "). Saved anyway; it's checked again on each highlight.")
+		} else {
+			ok("OBS connected")
+		}
+	}
+
 	if err := writeEnvFile(path, w.vals); err != nil {
 		return fmt.Errorf("saving settings: %w", err)
 	}
@@ -213,7 +246,12 @@ func setupCmd(ctx context.Context) error {
 	if inviteURL != "" {
 		fmt.Printf("\n  Last step: open this link to add the bot to your Discord server:\n\n    %s\n", inviteURL)
 	}
-	fmt.Println("\n  Start TrendPilot by double-clicking it again (or run: trendpilot run).")
+	fmt.Println(`
+  Start TrendPilot by double-clicking it again (or run: trendpilot run).
+  Then, in Discord, choose where updates go (in the channel you want):
+    /sendhere what:Trend alerts
+    /sendhere what:Clips & highlights
+    /sendhere what:Go-live announcements`)
 	return nil
 }
 
@@ -300,6 +338,9 @@ var envOrder = []struct{ key, comment string }{
 	{"TRENDPILOT_REGION", "Country for YouTube trends"},
 	{"TRENDPILOT_LANGUAGE", "Only count Twitch streams in this language (empty = all)"},
 	{"TRENDPILOT_TZ", "Your time zone, for best-time suggestions"},
+	{"TWITCH_CHANNEL", "Your Twitch channel: go-live posts, chat highlights, raid suggestions"},
+	{"OBS_WEBSOCKET_PASSWORD", "Optional: OBS WebSocket password, to save the replay buffer on highlights"},
+	{"OBS_WEBSOCKET_ADDR", "Optional: OBS address if not this computer (default localhost:4455)"},
 }
 
 func writeEnvFile(path string, vals map[string]string) error {

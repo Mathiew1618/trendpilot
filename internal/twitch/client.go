@@ -22,12 +22,16 @@ type Game struct {
 }
 
 type Stream struct {
+	UserID      string    `json:"user_id"`
 	UserLogin   string    `json:"user_login"`
+	UserName    string    `json:"user_name"`
 	GameID      string    `json:"game_id"`
 	GameName    string    `json:"game_name"`
+	Title       string    `json:"title"`
 	ViewerCount int       `json:"viewer_count"`
 	StartedAt   time.Time `json:"started_at"`
 	Language    string    `json:"language"`
+	IsMature    bool      `json:"is_mature"`
 }
 
 type Client struct {
@@ -194,6 +198,50 @@ func (c *Client) Streams(ctx context.Context, gameID, language string, pages int
 		}
 	}
 	return streams, true, nil
+}
+
+// StreamsPage returns one page (up to 100) of a game's live streams, most
+// viewers first, and the cursor for the next page ("" at the end).
+func (c *Client) StreamsPage(ctx context.Context, gameID, language, cursor string) ([]Stream, string, error) {
+	q := url.Values{"game_id": {gameID}, "first": {"100"}, "type": {"live"}}
+	if language != "" {
+		q.Set("language", language)
+	}
+	if cursor != "" {
+		q.Set("after", cursor)
+	}
+	var p page[Stream]
+	if err := c.get(ctx, "/streams", q, &p); err != nil {
+		return nil, "", err
+	}
+	next := p.Pagination.Cursor
+	if len(p.Data) < 100 {
+		next = ""
+	}
+	return p.Data, next, nil
+}
+
+// GameByName resolves a category by its exact Twitch name, falling back to
+// Twitch's category search for loose spellings ("silksong").
+func (c *Client) GameByName(ctx context.Context, name string) (Game, error) {
+	var p page[Game]
+	if err := c.get(ctx, "/games", url.Values{"name": {name}}, &p); err != nil {
+		return Game{}, err
+	}
+	if len(p.Data) > 0 {
+		return p.Data[0], nil
+	}
+	var s page[struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}]
+	if err := c.get(ctx, "/search/categories", url.Values{"query": {name}, "first": {"1"}}, &s); err != nil {
+		return Game{}, err
+	}
+	if len(s.Data) == 0 {
+		return Game{}, fmt.Errorf("no Twitch category matches %q", name)
+	}
+	return Game{ID: s.Data[0].ID, Name: s.Data[0].Name}, nil
 }
 
 // Genres looks up IGDB genre names for the given IGDB game IDs.

@@ -46,6 +46,8 @@ type TwitchSource interface {
 	TopGames(ctx context.Context, n int) ([]twitch.Game, error)
 	Streams(ctx context.Context, gameID, language string, pages int) ([]twitch.Stream, bool, error)
 	Genres(ctx context.Context, igdbIDs []string) (map[string][]string, error)
+	GameByName(ctx context.Context, name string) (twitch.Game, error)
+	StreamsPage(ctx context.Context, gameID, language, cursor string) ([]twitch.Stream, string, error)
 }
 
 type YouTubeSource interface {
@@ -71,9 +73,10 @@ type Service struct {
 	yt  YouTubeSource // may be nil
 	now func() time.Time
 
-	mu     sync.RWMutex
-	ring   []Snapshot
-	genres map[string][]string // igdb id -> genres; static, so cached for the process lifetime
+	mu       sync.RWMutex
+	ring     []Snapshot
+	genres   map[string][]string  // igdb id -> genres; static, so cached for the process lifetime
+	reported map[string]time.Time // shift key -> last alerted
 }
 
 func NewService(tw TwitchSource, yt YouTubeSource, hist *History) *Service {
@@ -112,31 +115,6 @@ func (s *Service) agoLocked(now time.Time, d time.Duration) (Snapshot, bool) {
 		}
 	}
 	return best, bestErr <= d/4
-}
-
-func (s *Service) Run(ctx context.Context, every time.Duration) {
-	t := time.NewTicker(every)
-	defer t.Stop()
-	saved := s.now()
-	for {
-		if _, err := s.Scan(ctx); err != nil && ctx.Err() == nil {
-			slog.Warn("game scan failed", "err", err)
-		}
-		if s.now().Sub(saved) >= time.Hour {
-			if err := s.Hist.Save(); err != nil {
-				slog.Warn("saving history failed", "err", err)
-			}
-			saved = s.now()
-		}
-		select {
-		case <-ctx.Done():
-			if err := s.Hist.Save(); err != nil {
-				slog.Warn("saving history failed", "err", err)
-			}
-			return
-		case <-t.C:
-		}
-	}
 }
 
 func (s *Service) Scan(ctx context.Context) (Snapshot, error) {

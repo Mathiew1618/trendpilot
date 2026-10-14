@@ -24,10 +24,15 @@ import (
 	"trendpilot/internal/app"
 	"trendpilot/internal/discord"
 	"trendpilot/internal/games"
+	"trendpilot/internal/jobs"
+	"trendpilot/internal/live"
 	"trendpilot/internal/llm"
 	"trendpilot/internal/monitor"
+	"trendpilot/internal/obs"
 	"trendpilot/internal/rewrite"
 	"trendpilot/internal/server"
+	"trendpilot/internal/store"
+	"trendpilot/internal/trends"
 	"trendpilot/internal/twitch"
 	"trendpilot/internal/usage"
 	"trendpilot/internal/youtube"
@@ -40,6 +45,7 @@ const helpText = `TrendPilot %s
 Usage:
   trendpilot                        First time: setup wizard. After that: same as run.
   trendpilot setup                  Enter or change your keys
+  trendpilot twitch-login           Sign in to your Twitch channel (clips, 1-click raids)
   trendpilot run                    Discord bot (if DISCORD_BOT_TOKEN is set) + monitor + local API
   trendpilot trends [-region US] [-category 20] [-n 15]
   trendpilot suggest -text "draft caption" [-platform youtube] [-niche "..."] [-region US]
@@ -82,6 +88,8 @@ func main() {
 	switch cmd, args := os.Args[1], os.Args[2:]; cmd {
 	case "setup":
 		err = setupCmd(ctx)
+	case "twitch-login":
+		err = twitchLoginCmd(ctx)
 	case "run":
 		err = run(ctx)
 	case "trends":
@@ -154,7 +162,7 @@ func newLLM() *llm.Client {
 }
 
 // build wires the agents. notify receives monitor alerts.
-func build(notify monitor.Notifier) (*app.App, error) {
+func build(notify monitor.Notifier) (*app.App, *twitch.Client, error) {
 	yt := youtube.New(env("YOUTUBE_API_KEY", ""))
 	mon := monitor.New(yt, notify)
 	region := strings.ToUpper(env("TRENDPILOT_REGION", "US"))
@@ -162,13 +170,13 @@ func build(notify monitor.Notifier) (*app.App, error) {
 
 	id, secret := env("TWITCH_CLIENT_ID", ""), env("TWITCH_CLIENT_SECRET", "")
 	if id == "" || secret == "" {
-		return a, nil
+		return a, nil, nil
 	}
 	tw := twitch.New(id, secret)
 	tw.UserAgent = llm.UserAgent
 	loc, err := time.LoadLocation(env("TRENDPILOT_TZ", "Local"))
 	if err != nil {
-		return nil, fmt.Errorf("TRENDPILOT_TZ: %w (use a name like America/New_York)", err)
+		return nil, nil, fmt.Errorf("TRENDPILOT_TZ: %w (use a name like America/New_York)", err)
 	}
 	var ytSrc games.YouTubeSource
 	if yt.Key != "" {
@@ -180,30 +188,50 @@ func build(notify monitor.Notifier) (*app.App, error) {
 	g.Region = region
 	g.Loc = loc
 	a.Games = g
-	return a, nil
+	return a, tw, nil
+}
+
+// configDir holds TrendPilot's small files: viewer history, Discord
+// channel settings and the creator's Twitch sign-in.
+func configDir() string {
+	if d := env("TRENDPILOT_DATA_DIR", ""); d != "" && !strings.EqualFold(d, "off") {
+		return d
+	}
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return "."
+	}
+	return filepath.Join(base, "trendpilot")
 }
 
 // historyPath is where hour-of-week viewer averages are kept between runs.
-// TRENDPILOT_DATA_DIR=off keeps everything in memory.
+// TRENDPILOT_DATA_DIR=off keeps them in memory only.
 func historyPath() string {
-	dir := env("TRENDPILOT_DATA_DIR", "")
-	if strings.EqualFold(dir, "off") {
+	if strings.EqualFold(env("TRENDPILOT_DATA_DIR", ""), "off") {
 		return ""
 	}
-	if dir == "" {
-		base, err := os.UserConfigDir()
-		if err != nil {
-			return ""
-		}
-		dir = filepath.Join(base, "trendpilot")
-	}
-	return filepath.Join(dir, "history.json")
+	return filepath.Join(configDir(), "history.json")
 }
+
+func userTokenPath() string { return filepath.Join(configDir(), "twitch-user.json") }
 
 func run(ctx context.Context) error {
 	if env("YOUTUBE_API_KEY", "") == "" && env("TWITCH_CLIENT_ID", "") == "" {
 		return errors.New("set YOUTUBE_API_KEY and/or TWITCH_CLIENT_ID + TWITCH_CLIENT_SECRET in trendpilot.env (see SETUP.md)")
 	}
+	every, err := time.ParseDuration(env("TRENDPILOT_POLL", "5m"))
+	if err != nil || every < time.Minute {
+		return fmt.Errorf("TRENDPILOT_POLL must be a duration of at least 1m, got %q", env("TRENDPILOT_POLL", ""))
+	}
+	scanEvery, err := time.ParseDuration(env("TRENDPILOT_SCAN", "10m"))
+	if err != nil || scanEvery < 2*time.Minute {
+		return fmt.Errorf("TRENDPILOT_SCAN must be a duration of at least 2m, got %q", env("TRENDPILOT_SCAN", ""))
+	}
+	shiftWindow, err := time.ParseDuration(env("TRENDPILOT_SHIFT_WINDOW", "20m"))
+	if err != nil || shiftWindow < scanEvery {
+		return fmt.Errorf("TRENDPILOT_SHIFT_WINDOW must be a duration of at least TRENDPILOT_SCAN, got %q", env("TRENDPILOT_SHIFT_WINDOW", ""))
+	}
+
 	var bot *discord.Bot
 	webhook := env("TRENDPILOT_WEBHOOK", "")
 	notify := func(owner string, a monitor.Alert) {
@@ -215,45 +243,83 @@ func run(ctx context.Context) error {
 			postWebhook(webhook, a)
 		}
 	}
-	a, err := build(notify)
+	a, tw, err := build(notify)
 	if err != nil {
 		return err
 	}
-
+	settings := store.Open(filepath.Join(configDir(), "settings.json"))
+	var poster live.Poster = logPoster{}
 	if tok := env("DISCORD_BOT_TOKEN", ""); tok != "" {
-		var err error
 		if bot, err = discord.New(tok, env("DISCORD_GUILD_ID", ""), a); err != nil {
 			return err
 		}
+		bot.Store = settings
+		poster = bot
 	}
 
-	every, err := time.ParseDuration(env("TRENDPILOT_POLL", "5m"))
-	if err != nil {
-		return fmt.Errorf("TRENDPILOT_POLL: %w", err)
-	}
-	scanEvery, err := time.ParseDuration(env("TRENDPILOT_SCAN", "10m"))
-	if err != nil || scanEvery < 2*time.Minute {
-		return fmt.Errorf("TRENDPILOT_SCAN must be a duration of at least 2m, got %q", env("TRENDPILOT_SCAN", ""))
-	}
-	if err != nil || every < time.Minute {
-		return fmt.Errorf("TRENDPILOT_POLL must be a duration of at least 1m, got %q", env("TRENDPILOT_POLL", ""))
-	}
+	sched := jobs.New()
 	if env("YOUTUBE_API_KEY", "") != "" {
-		go a.Monitor.Run(ctx, every)
-		go a.Refresh(ctx)
+		sched.Add(jobs.Job{Name: "watch-videos", Every: every, Delay: 5 * time.Second, Run: a.Monitor.Poll})
+		sched.Add(jobs.Job{Name: "youtube-trends", Every: app.TrendTTL, Delay: 2 * time.Second, Run: a.RefreshOnce})
 	} else {
 		slog.Info("YOUTUBE_API_KEY not set; YouTube trends and /watch are off")
 	}
 	if a.Games != nil {
-		go a.Games.Run(ctx, scanEvery)
+		sched.Add(jobs.Job{Name: "game-scan", Every: scanEvery, Run: func(ctx context.Context) error {
+			if _, err := a.Games.Scan(ctx); err != nil {
+				return err
+			}
+			if bot != nil {
+				bot.PostShifts(a.Games.NewShifts(shiftWindow, 2*time.Hour, games.DefaultRules))
+			}
+			return nil
+		}})
+		sched.Add(jobs.Job{Name: "save-history", Every: time.Hour, Delay: time.Hour, Run: func(context.Context) error { return a.Games.Hist.Save() }})
+		defer func() {
+			if err := a.Games.Hist.Save(); err != nil {
+				slog.Warn("saving history failed", "err", err)
+			}
+		}()
 		slog.Info("game market scan on", "every", scanEvery, "categories", a.Games.TopN, "history", historyPath())
 	} else {
 		slog.Info("TWITCH_CLIENT_ID/SECRET not set; game trends are off")
 	}
-	go reportUsage(ctx)
+
+	if channel := env("TWITCH_CHANNEL", ""); channel != "" && tw != nil {
+		user := tw.LoadUserAuth(userTokenPath())
+		var clipper live.Clipper
+		if user != nil && user.HasScope("clips:edit") {
+			clipper = user
+		}
+		var replay live.Replayer
+		if pw, addr := env("OBS_WEBSOCKET_PASSWORD", ""), env("OBS_WEBSOCKET_ADDR", ""); pw != "" || addr != "" {
+			replay = &obs.Client{Addr: addr, Password: pw}
+		}
+		trendsFn := func() []trends.Trend {
+			tctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			ts, _ := a.Trends(tctx, "", "")
+			return ts
+		}
+		w := live.NewWatcher(channel, tw, poster, newLLM(), clipper, replay, trendsFn)
+		sched.Add(jobs.Job{Name: "stream-status", Every: time.Minute, Delay: 3 * time.Second, Run: w.Poll})
+		go w.RunChat(ctx)
+		if bot != nil {
+			bot.Watcher, bot.User = w, user
+		}
+		slog.Info("following your stream", "channel", channel, "clips", clipper != nil, "obs", replay != nil)
+	}
+	sched.Add(jobs.Job{Name: "usage-report", Every: time.Hour, Delay: time.Hour, Run: logUsage})
+	sched.Start(ctx)
 
 	addr := env("TRENDPILOT_ADDR", "127.0.0.1:8790")
-	srv := &http.Server{Addr: addr, Handler: server.Handler(a), ReadHeaderTimeout: 10 * time.Second}
+	mux := http.NewServeMux()
+	mux.Handle("/", server.Handler(a))
+	mux.HandleFunc("GET /api/jobs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(sched.Status())
+	})
+	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -280,21 +346,43 @@ func run(ctx context.Context) error {
 	}
 }
 
-// reportUsage logs what TrendPilot is costing the machine, every hour, so a
-// streamer can check it never competes with their stream.
-func reportUsage(ctx context.Context) {
-	t := time.NewTicker(time.Hour)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			r := usage.Snapshot()
-			slog.Info("usage", "cpu_pct_of_one_core", r.CPUPercent, "memory_mb", r.MemoryMB,
-				"mb_per_hour", r.MBPerHour, "avg_kbps", r.AvgKbps, "api_requests", r.Requests)
-		}
+// logPoster stands in for Discord: stream posts go to the log.
+type logPoster struct{}
+
+func (logPoster) GoLive(_ context.Context, text string) { slog.Info("go-live post", "text", text) }
+func (logPoster) Recap(_ context.Context, text string)  { slog.Info("stream recap", "text", text) }
+func (logPoster) Queue(_ context.Context, it *live.QueueItem) {
+	slog.Info("highlight", "title", it.Title, "clip", it.ClipURL, "at", it.Offset)
+}
+
+// twitchLoginCmd signs the creator in to Twitch for clips and raids.
+func twitchLoginCmd(ctx context.Context) error {
+	id, secret := env("TWITCH_CLIENT_ID", ""), env("TWITCH_CLIENT_SECRET", "")
+	if id == "" || secret == "" {
+		return errors.New("set up the Twitch app first (run: trendpilot setup)")
 	}
+	tw := twitch.New(id, secret)
+	tw.UserAgent = llm.UserAgent
+	tok, err := tw.DeviceLogin(ctx, func(uri, code string) {
+		fmt.Printf("\n  1. Open %s\n  2. Check the code matches: %s\n  3. Click Authorize.\n\n  Waiting for you...\n", uri, code)
+	})
+	if err != nil {
+		return err
+	}
+	if err := twitch.SaveUserToken(userTokenPath(), tok); err != nil {
+		return err
+	}
+	fmt.Printf("  ✅ Signed in as %s. Clips and 1-click raids are on.\n", tok.Login)
+	return nil
+}
+
+// logUsage writes what TrendPilot is costing the machine to its window,
+// so a streamer can check it never competes with their stream.
+func logUsage(context.Context) error {
+	r := usage.Snapshot()
+	slog.Info("usage", "cpu_pct_of_one_core", r.CPUPercent, "memory_mb", r.MemoryMB,
+		"mb_per_hour", r.MBPerHour, "avg_kbps", r.AvgKbps, "api_requests", r.Requests)
+	return nil
 }
 
 func postWebhook(url string, a monitor.Alert) {
@@ -318,7 +406,7 @@ func trendsCmd(ctx context.Context, args []string) error {
 	asJSON := fs.Bool("json", false, "print JSON")
 	fs.Parse(args)
 
-	a, err := build(func(string, monitor.Alert) {})
+	a, _, err := build(func(string, monitor.Alert) {})
 	if err != nil {
 		return err
 	}
@@ -351,7 +439,7 @@ func suggestCmd(ctx context.Context, args []string) error {
 	if *text == "" {
 		return errors.New("-text is required")
 	}
-	a, err := build(func(string, monitor.Alert) {})
+	a, _, err := build(func(string, monitor.Alert) {})
 	if err != nil {
 		return err
 	}
@@ -369,7 +457,7 @@ func gamesCmd(ctx context.Context, args []string) error {
 	genre := fs.String("genre", "", "only games in this genre")
 	asJSON := fs.Bool("json", false, "print JSON")
 	fs.Parse(args)
-	a, err := build(func(string, monitor.Alert) {})
+	a, _, err := build(func(string, monitor.Alert) {})
 	if err != nil {
 		return err
 	}
