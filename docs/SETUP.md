@@ -72,7 +72,7 @@ This creates *your own* TrendPilot bot account.
    Twitch requires two-factor authentication for this page. If it asks, turn it on under *Settings → Security and Privacy*.
 2. Click **Register Your Application** and fill in:
    - **Name:** `TrendPilot-` plus your channel name (names must be unique across Twitch)
-   - **OAuth Redirect URLs:** `http://localhost`
+   - **OAuth Redirect URLs:** `https://localhost` (type it exactly, then click **Add**; TrendPilot never uses it, but Twitch requires one)
    - **Category:** Analytics Tool
    - **Client Type:** Confidential
 3. Tick the "I'm not a robot" box and click **Create**.

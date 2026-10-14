@@ -121,7 +121,7 @@ func setupCmd(ctx context.Context) error {
 	section(3, "Twitch app (which games are trending, best times to stream)")
 	fmt.Println(`  1. Open https://dev.twitch.tv/console/apps and log in (Twitch may ask you to turn on 2-factor).
   2. Click "Register Your Application". Name: TrendPilot-<your name>.
-     OAuth Redirect URL: http://localhost   Category: Analytics Tool   Client Type: Confidential
+     OAuth Redirect URL: https://localhost (click Add)   Category: Analytics Tool   Client Type: Confidential
   3. Click "Manage", copy the Client ID, then click "New Secret" and copy the secret.`)
 	for {
 		id := w.askKey("TWITCH_CLIENT_ID", "Twitch Client ID")
