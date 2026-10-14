@@ -29,8 +29,11 @@ type GameStat struct {
 	More     bool     `json:"more"`      // more live channels than were scanned
 	EntryBar int      `json:"entry_bar"` // viewers of the #25 stream: what it takes to be on the first screens
 	Growth   float64  `json:"growth"`    // viewer change vs ~1 h ago (0.25 = +25%)
-	// Opportunity = viewers per entry-bar viewer, nudged by growth: a big
-	// audience you can reach the top of with a small stream.
+	// TailViewers watch streams outside the top 3: the audience actually
+	// spread across smaller channels. One mega-streamer doesn't count.
+	TailViewers int `json:"tail_viewers"`
+	// Opportunity = tail viewers per entry-bar viewer, nudged by growth: a
+	// big audience you can reach the top of with a small stream.
 	Opportunity float64 `json:"opportunity"`
 	YTVideos    int     `json:"yt_videos"` // trending YouTube gaming videos about it
 }
@@ -46,6 +49,7 @@ type TwitchSource interface {
 	TopGames(ctx context.Context, n int) ([]twitch.Game, error)
 	Streams(ctx context.Context, gameID, language string, pages int) ([]twitch.Stream, bool, error)
 	Genres(ctx context.Context, igdbIDs []string) (map[string][]string, error)
+	GenresByName(ctx context.Context, name string) ([]string, error)
 	GameByName(ctx context.Context, name string) (twitch.Game, error)
 	StreamsPage(ctx context.Context, gameID, language, cursor string) ([]twitch.Stream, string, error)
 }
@@ -190,8 +194,11 @@ func (s *Service) Scan(ctx context.Context) (Snapshot, error) {
 func summarize(g twitch.Game, streams []twitch.Stream, more bool) GameStat {
 	st := GameStat{ID: g.ID, Key: trends.Normalize(g.Name), Name: g.Name, Channels: len(streams), More: more}
 	sort.Slice(streams, func(i, j int) bool { return streams[i].ViewerCount > streams[j].ViewerCount })
-	for _, x := range streams {
+	for i, x := range streams {
 		st.Viewers += x.ViewerCount
+		if i >= 3 {
+			st.TailViewers += x.ViewerCount
+		}
 	}
 	if len(streams) >= entryRank {
 		st.EntryBar = streams[entryRank-1].ViewerCount
@@ -201,13 +208,27 @@ func summarize(g twitch.Game, streams []twitch.Stream, more bool) GameStat {
 
 func (s *Service) fillGenres(ctx context.Context, top []twitch.Game, stats []GameStat) {
 	var missing []string
+	var unlinked []twitch.Game
 	s.mu.RLock()
 	for _, g := range top {
 		if _, ok := s.genres[g.IGDBID]; g.IGDBID != "" && !ok {
 			missing = append(missing, g.IGDBID)
 		}
+		if _, ok := s.genres["name:"+g.Name]; g.IGDBID == "" && !NonGaming(g.Name) && !ok {
+			unlinked = append(unlinked, g)
+		}
 	}
 	s.mu.RUnlock()
+	for _, g := range unlinked {
+		gs, err := s.tw.GenresByName(ctx, g.Name)
+		if err != nil {
+			slog.Warn("genre search failed", "game", g.Name, "err", err)
+			continue
+		}
+		s.mu.Lock()
+		s.genres["name:"+g.Name] = gs
+		s.mu.Unlock()
+	}
 	if len(missing) > 0 {
 		found, err := s.tw.Genres(ctx, missing)
 		if err != nil {
@@ -225,8 +246,10 @@ func (s *Service) fillGenres(ctx context.Context, top []twitch.Game, stats []Gam
 	defer s.mu.RUnlock()
 	for i, g := range top {
 		switch {
-		case g.IGDBID == "":
-			stats[i].Genres = []string{nonGaming} // Just Chatting, IRL, Music...
+		case NonGaming(g.Name):
+			stats[i].Genres = []string{nonGaming}
+		case g.IGDBID == "" && len(s.genres["name:"+g.Name]) > 0:
+			stats[i].Genres = s.genres["name:"+g.Name]
 		case len(s.genres[g.IGDBID]) > 0:
 			stats[i].Genres = s.genres[g.IGDBID]
 		default:
@@ -234,6 +257,26 @@ func (s *Service) fillGenres(ctx context.Context, top []twitch.Game, stats []Gam
 		}
 	}
 }
+
+// nonGamingCategories are Twitch categories that aren't games.
+var nonGamingCategories = map[string]bool{
+	"justchatting": true, "irl": true, "slots": true, "virtualcasino": true, "sports": true,
+	"alwayson": true, "music": true, "art": true, "talkshowspodcasts": true, "asmr": true,
+	"poolshottubsandbeaches": true, "specialevents": true, "travelandoutdoors": true,
+	"travelamputdoors": true, "foodanddrink": true, "fooddrink": true, "scienceandtechnology": true,
+	"sciencetechnology": true, "softwareandgamedevelopment": true, "softwaregamedevelopment": true,
+	"makersandcrafting": true, "makerscrafting": true, "politics": true, "fitnessandhealth": true,
+	"fitnesshealth": true, "beautyandbodyart": true, "beautybodyart": true, "animals": true,
+	"animalsaquariumsandzoos": true, "animalsaquariumszoos": true, "dj": true, "crypto": true,
+	"stocksandbonds": true, "stocksbonds": true, "lottery": true, "pokerstars": true,
+	"spirituality": true, "writingandreading": true, "writingreading": true, "co_working": true,
+	"coworkingandstudying": true, "coworkingstudying": true, "hometvanddecor": true,
+	"housingandhomedecor": true, "parentingandfamily": true, "fashion": true, "watchparty": true,
+	"creatorsmp": true, "eventsandeasts": true,
+}
+
+// NonGaming reports whether a Twitch category is not a game.
+func NonGaming(name string) bool { return nonGamingCategories[trends.Normalize(name)] }
 
 func score(gs []GameStat, prev Snapshot) {
 	before := map[string]int{}
@@ -246,7 +289,7 @@ func score(gs []GameStat, prev Snapshot) {
 			g.Growth = round(float64(g.Viewers-p) / float64(p))
 		}
 		boost := 1 + math.Max(-0.5, math.Min(g.Growth, 1))
-		g.Opportunity = round(float64(g.Viewers) / float64(g.EntryBar+1) * boost)
+		g.Opportunity = round(float64(g.TailViewers) / float64(g.EntryBar+1) * boost)
 	}
 }
 

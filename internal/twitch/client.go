@@ -192,8 +192,10 @@ func (c *Client) Streams(ctx context.Context, gameID, language string, pages int
 			return streams, false, err
 		}
 		streams = append(streams, p.Data...)
+		// Twitch often returns a few less than 100 on a full page, so only
+		// a missing cursor (or an empty page) means the end.
 		cursor = p.Pagination.Cursor
-		if cursor == "" || len(p.Data) < 100 {
+		if cursor == "" || len(p.Data) == 0 {
 			return streams, false, nil
 		}
 	}
@@ -215,7 +217,7 @@ func (c *Client) StreamsPage(ctx context.Context, gameID, language, cursor strin
 		return nil, "", err
 	}
 	next := p.Pagination.Cursor
-	if len(p.Data) < 100 {
+	if len(p.Data) == 0 {
 		next = ""
 	}
 	return p.Data, next, nil
@@ -242,6 +244,42 @@ func (c *Client) GameByName(ctx context.Context, name string) (Game, error) {
 		return Game{}, fmt.Errorf("no Twitch category matches %q", name)
 	}
 	return Game{ID: s.Data[0].ID, Name: s.Data[0].Name}, nil
+}
+
+// GenresByName looks up genres for categories Twitch hasn't linked to
+// IGDB, using IGDB's search and taking the best-known match.
+func (c *Client) GenresByName(ctx context.Context, name string) ([]string, error) {
+	q := strings.NewReplacer(`"`, "", `\`, "").Replace(name)
+	body := fmt.Sprintf(`search "%s"; fields name,genres.name,total_rating_count; where genres != null; limit 5;`, q)
+	var rows []struct {
+		Name   string `json:"name"`
+		Count  int    `json:"total_rating_count"`
+		Genres []struct {
+			Name string `json:"name"`
+		} `json:"genres"`
+	}
+	err := c.authed(ctx, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.IGDB+"/games", strings.NewReader(body))
+		if err == nil {
+			req.Header.Set("Accept", "application/json")
+		}
+		return req, err
+	}, &rows)
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	best := 0
+	for i, r := range rows {
+		exact := strings.EqualFold(r.Name, name)
+		if exact && !strings.EqualFold(rows[best].Name, name) || (exact == strings.EqualFold(rows[best].Name, name) && r.Count > rows[best].Count) {
+			best = i
+		}
+	}
+	var out []string
+	for _, g := range rows[best].Genres {
+		out = append(out, g.Name)
+	}
+	return out, nil
 }
 
 // Genres looks up IGDB genre names for the given IGDB game IDs.

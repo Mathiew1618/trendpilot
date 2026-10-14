@@ -21,6 +21,7 @@ func (f *fakeTwitch) TopGames(ctx context.Context, n int) ([]twitch.Game, error)
 		{ID: "1", Name: "Just Chatting"},
 		{ID: "2", Name: "Fortnite", IGDBID: "1905"},
 		{ID: "3", Name: "Hollow Knight: Silksong", IGDBID: "115289"},
+		{ID: "4", Name: "Counter-Strike"},
 	}, nil
 }
 
@@ -30,6 +31,13 @@ func (f *fakeTwitch) Streams(ctx context.Context, gameID, lang string, pages int
 		out = append(out, twitch.Stream{GameID: gameID, ViewerCount: v})
 	}
 	return out, false, nil
+}
+
+func (f *fakeTwitch) GenresByName(ctx context.Context, name string) ([]string, error) {
+	if name == "Counter-Strike" {
+		return []string{"Shooter", "Tactical"}, nil
+	}
+	return nil, nil
 }
 
 func (f *fakeTwitch) Genres(ctx context.Context, ids []string) (map[string][]string, error) {
@@ -62,7 +70,7 @@ func TestScanScoresGrowthGenresAndMentions(t *testing.T) {
 	tw := &fakeTwitch{viewers: map[string][]int{
 		"1": spread(50000, 100), // huge, high entry bar
 		"2": spread(30000, 100),
-		"3": append([]int{4000, 3000, 2000}, make([]int, 60)...), // a few big streams, then tiny ones
+		"3": append([]int{4000, 3000, 2000}, repeat(30, 60)...), // a few big streams, then many small ones
 	}}
 	s := NewService(tw, fakeYT{}, NewHistory(""))
 	now := t0
@@ -85,14 +93,17 @@ func TestScanScoresGrowthGenresAndMentions(t *testing.T) {
 		by[g.Name] = g
 	}
 	silk := by["Hollow Knight: Silksong"]
-	if silk.Growth <= 0.5 || silk.EntryBar != 0 || silk.YTVideos != 1 || silk.Genres[0] != "Platform" {
+	if silk.Growth <= 0.5 || silk.EntryBar != 30 || silk.TailViewers != 1800 || silk.YTVideos != 1 || silk.Genres[0] != "Platform" {
 		t.Fatalf("silksong %+v", silk)
+	}
+	if by["Counter-Strike"].Genres[0] != "Shooter" {
+		t.Fatalf("unlinked game genres %+v", by["Counter-Strike"])
 	}
 	if by["Just Chatting"].Genres[0] != nonGaming || by["Fortnite"].YTVideos != 2 {
 		t.Fatalf("chatting %+v fortnite %+v", by["Just Chatting"], by["Fortnite"])
 	}
 	ops := s.Opportunities("")
-	if len(ops) != 2 || ops[0].Name != "Hollow Knight: Silksong" {
+	if len(ops) != 3 || ops[0].Name != "Hollow Knight: Silksong" {
 		t.Fatalf("opportunities %+v", ops)
 	}
 	if got := s.Opportunities("shoot"); len(got) != 1 || got[0].Name != "Fortnite" {
@@ -159,5 +170,23 @@ func TestFind(t *testing.T) {
 	}
 	if k, _, _ := s.Find(""); k != AllKey {
 		t.Fatalf("empty query should mean all games, got %q", k)
+	}
+}
+
+func repeat(v, n int) []int {
+	out := make([]int, n)
+	for i := range out {
+		out[i] = v
+	}
+	return out
+}
+
+// One mega-streamer with a handful of tiny channels is not an opening.
+func TestOneStreamerCategoryIsNotAnOpening(t *testing.T) {
+	g := summarize(twitch.Game{Name: "Bellum"}, []twitch.Stream{{ViewerCount: 33000}, {ViewerCount: 900}, {ViewerCount: 50}, {ViewerCount: 30}, {ViewerCount: 15}}, false)
+	gs := []GameStat{g}
+	score(gs, Snapshot{})
+	if gs[0].Opportunity > 50 {
+		t.Fatalf("opportunity %v for a one-streamer category", gs[0].Opportunity)
 	}
 }
