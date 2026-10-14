@@ -96,3 +96,21 @@ func TestReadChat(t *testing.T) {
 		t.Fatal("no message")
 	}
 }
+
+// A chat that is busy from the first second, with an ordinary 1.7x flurry
+// just after warm-up, is not a surge.
+func TestBusyChatFlurryAfterWarmupIsNotASurge(t *testing.T) {
+	d := NewSurgeDetector()
+	start := time.Unix(1_800_000_000, 0)
+	at := start
+	for at.Before(start.Add(10 * time.Minute)) {
+		rate := 6.0 // messages per second
+		if el := at.Sub(start); el >= 2*time.Minute && el < 2*time.Minute+20*time.Second {
+			rate = 10
+		}
+		if _, ok := d.Add(ChatMessage{At: at, Text: "nice"}); ok {
+			t.Fatalf("ordinary flurry surged at %s", at.Sub(start))
+		}
+		at = at.Add(time.Duration(float64(time.Second) / rate))
+	}
+}

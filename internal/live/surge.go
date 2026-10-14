@@ -26,6 +26,7 @@ type SurgeDetector struct {
 
 	msgs      []weighted
 	baseline  float64
+	folded    int // windows folded into the baseline
 	baseSince time.Time
 	lastFold  time.Time
 	lastSurge time.Time
@@ -61,10 +62,18 @@ func (d *SurgeDetector) Add(m ChatMessage) (Surge, bool) {
 	}
 	d.msgs = append(d.msgs, weighted{m, weight(m.Text)})
 
-	// Fold finished windows into the baseline (EWMA over ~10 windows).
+	// Fold finished windows into the baseline: a plain average for the
+	// first 10 windows (so a steadily busy chat isn't mistaken for a surge
+	// the moment warm-up ends), then an EWMA over ~10 windows.
 	for m.At.Sub(d.lastFold) >= d.Window {
 		end := d.lastFold.Add(d.Window)
-		d.baseline = 0.9*d.baseline + 0.1*d.sum(d.lastFold, end)
+		w := d.sum(d.lastFold, end)
+		if d.folded < 10 {
+			d.baseline = (d.baseline*float64(d.folded) + w) / float64(d.folded+1)
+		} else {
+			d.baseline = 0.9*d.baseline + 0.1*w
+		}
+		d.folded++
 		d.lastFold = end
 	}
 	// Keep two windows of messages: the live one and the sample before it.

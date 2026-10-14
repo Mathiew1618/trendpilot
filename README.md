@@ -99,7 +99,17 @@ After that, double-click TrendPilot whenever you want it running. That's it.
 ### What it uses
 
 <!-- METRICS:START -->
-_Measured numbers are being collected and will appear here._
+Measured over 30 minutes doing everything at once: scanning the top 30 Twitch categories and YouTube's trending charts every 10 minutes, following **one of Twitch's busiest live chats** (a worst case; your chat will be quieter), and tracking a YouTube video. Numbers come from the operating system, sampled every 2 seconds.
+
+| | TrendPilot | What that means |
+|---|---|---|
+| **CPU** | **0.15%** of one core on average | A short blip to about 6% for 2 seconds every 10 minutes while it scans. The rest of the time it's asleep. |
+| **Memory** | **15 MB** (17 MB at most) | Less than a single browser tab. |
+| **Upload** | **≈0.5 kbps** | Streaming is limited by your upload. A 6,000 kbps Twitch stream is about **12,000×** more. |
+| **Download** | **≈72 kbps** (33 MB an hour) | About what a music stream at low quality uses. A quiet chat brings it lower. |
+| **Disk** | One small file of hourly viewer averages | Nothing is written while you stream except that file, once an hour. |
+
+<sub>Measured 14 Oct 2026 on a 2-core cloud Linux machine (GitHub Codespace). 244 API requests, 0 failures. Your own numbers appear in TrendPilot's window every hour.</sub>
 <!-- METRICS:END -->
 
 ### Why it can't get in your stream's way
