@@ -159,7 +159,7 @@ func (s *Service) Scan(ctx context.Context) (Snapshot, error) {
 	}
 
 	if s.yt != nil {
-		if vs, err := s.yt.MostPopular(ctx, s.Region, ytGaming, 50); err != nil {
+		if vs, err := s.yt.MostPopular(ctx, s.Region, ytGaming, 100); err != nil {
 			slog.Warn("youtube gaming chart failed", "err", err)
 		} else {
 			mentions(snap.Games, vs)

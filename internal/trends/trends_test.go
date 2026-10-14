@@ -121,3 +121,10 @@ type staticSrc struct{ vs []youtube.Video }
 func (s *staticSrc) MostPopular(ctx context.Context, region, category string, max int) ([]youtube.Video, error) {
 	return s.vs, nil
 }
+
+func TestSetMeasures(t *testing.T) {
+	a, b := []int{1, 2}, []int{1, 2, 3, 4}
+	if jaccard(a, b) != 0.5 || overlap(a, b) != 1 || overlap(nil, b) != 0 {
+		t.Fatalf("jaccard %v overlap %v", jaccard(a, b), overlap(a, b))
+	}
+}

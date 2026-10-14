@@ -42,3 +42,22 @@ func TestAPIError(t *testing.T) {
 		t.Fatal("want error")
 	}
 }
+
+func TestMostPopularPages(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Query().Get("pageToken") == "" {
+			w.Write([]byte(`{"nextPageToken":"p2","items":[{"id":"a"},{"id":"b"}]}`))
+			return
+		}
+		w.Write([]byte(`{"items":[{"id":"c"}]}`))
+	}))
+	defer srv.Close()
+	c := New("k")
+	c.Base = srv.URL
+	vs, err := c.MostPopular(context.Background(), "US", "", 200)
+	if err != nil || len(vs) != 3 || calls != 2 {
+		t.Fatalf("vs=%d calls=%d err=%v", len(vs), calls, err)
+	}
+}

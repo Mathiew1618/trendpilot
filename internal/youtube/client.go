@@ -40,19 +40,39 @@ func New(key string) *Client {
 	return &Client{Key: key, Base: defaultBase, HTTP: &http.Client{Timeout: 20 * time.Second}}
 }
 
-// MostPopular returns the region's trending chart (videos.list chart=mostPopular,
-// 1 quota unit per call). category may be empty for all categories.
+// MostPopular returns up to max videos from the region's trending chart
+// (videos.list chart=mostPopular; 1 quota unit per page of 50, and YouTube
+// serves at most 200). category may be empty for all categories.
 func (c *Client) MostPopular(ctx context.Context, region, category string, max int) ([]Video, error) {
-	q := url.Values{
-		"part":       {"snippet,statistics"},
-		"chart":      {"mostPopular"},
-		"regionCode": {region},
-		"maxResults": {strconv.Itoa(min(max, 50))},
+	var out []Video
+	token := ""
+	for len(out) < max {
+		q := url.Values{
+			"part":       {"snippet,statistics"},
+			"chart":      {"mostPopular"},
+			"regionCode": {region},
+			"maxResults": {strconv.Itoa(min(max-len(out), 50))},
+		}
+		if category != "" {
+			q.Set("videoCategoryId", category)
+		}
+		if token != "" {
+			q.Set("pageToken", token)
+		}
+		vs, next, err := c.page(ctx, q)
+		if err != nil {
+			if len(out) > 0 {
+				return out, nil // keep what we have
+			}
+			return nil, err
+		}
+		out = append(out, vs...)
+		if next == "" || len(vs) == 0 {
+			break
+		}
+		token = next
 	}
-	if category != "" {
-		q.Set("videoCategoryId", category)
-	}
-	return c.list(ctx, q)
+	return out, nil
 }
 
 // Stats fetches current statistics for the given video IDs, 50 per call.
@@ -61,7 +81,7 @@ func (c *Client) Stats(ctx context.Context, ids []string) ([]Video, error) {
 	for start := 0; start < len(ids); start += 50 {
 		end := min(start+50, len(ids))
 		q := url.Values{"part": {"snippet,statistics"}, "id": {strings.Join(ids[start:end], ",")}}
-		vs, err := c.list(ctx, q)
+		vs, _, err := c.page(ctx, q)
 		if err != nil {
 			return out, err
 		}
@@ -71,7 +91,8 @@ func (c *Client) Stats(ctx context.Context, ids []string) ([]Video, error) {
 }
 
 type listResponse struct {
-	Items []struct {
+	NextPageToken string `json:"nextPageToken"`
+	Items         []struct {
 		ID      string `json:"id"`
 		Snippet struct {
 			PublishedAt  time.Time `json:"publishedAt"`
@@ -94,33 +115,33 @@ type listResponse struct {
 	} `json:"error"`
 }
 
-func (c *Client) list(ctx context.Context, q url.Values) ([]Video, error) {
+func (c *Client) page(ctx context.Context, q url.Values) ([]Video, string, error) {
 	if c.Key == "" {
-		return nil, fmt.Errorf("youtube: YOUTUBE_API_KEY is not set")
+		return nil, "", fmt.Errorf("youtube: YOUTUBE_API_KEY is not set")
 	}
 	q.Set("key", c.Key)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.Base+"/videos?"+q.Encode(), nil)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("youtube: %w", err)
+		return nil, "", fmt.Errorf("youtube: %w", err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var lr listResponse
 	if err := json.Unmarshal(body, &lr); err != nil {
-		return nil, fmt.Errorf("youtube: decode (HTTP %d): %w", resp.StatusCode, err)
+		return nil, "", fmt.Errorf("youtube: decode (HTTP %d): %w", resp.StatusCode, err)
 	}
 	if lr.Error != nil {
-		return nil, fmt.Errorf("youtube: HTTP %d: %s", lr.Error.Code, lr.Error.Message)
+		return nil, "", fmt.Errorf("youtube: HTTP %d: %s", lr.Error.Code, lr.Error.Message)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("youtube: HTTP %d", resp.StatusCode)
+		return nil, "", fmt.Errorf("youtube: HTTP %d", resp.StatusCode)
 	}
 	out := make([]Video, 0, len(lr.Items))
 	for _, it := range lr.Items {
@@ -134,7 +155,7 @@ func (c *Client) list(ctx context.Context, q url.Values) ([]Video, error) {
 			Comments: atoi(it.Statistics.CommentCount),
 		})
 	}
-	return out, nil
+	return out, lr.NextPageToken, nil
 }
 
 // Counts arrive as strings and are omitted when the owner hides them.

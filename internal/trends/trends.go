@@ -52,7 +52,7 @@ func NewTracker(src Source) *Tracker {
 
 // Snapshot fetches the chart, scores every term and returns them best first.
 func (t *Tracker) Snapshot(ctx context.Context, region, category string) ([]Trend, error) {
-	vs, err := t.src.MostPopular(ctx, region, category, 50)
+	vs, err := t.src.MostPopular(ctx, region, category, 200)
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +174,7 @@ func Score(vs []youtube.Video, prev map[string]float64, now time.Time) []Trend {
 next:
 	for _, t := range out {
 		for i := range grouped {
-			if jaccard(sets[t.Key], sets[grouped[i].Key]) >= 0.6 {
+			if a, b := sets[t.Key], sets[grouped[i].Key]; jaccard(a, b) >= 0.6 || overlap(a, b) >= 0.8 {
 				if len(grouped[i].Related) < 5 {
 					grouped[i].Related = append(grouped[i].Related, t.Term)
 				}
@@ -187,13 +187,13 @@ next:
 	return grouped
 }
 
-// jaccard is |a∩b| / |a∪b| for two sorted index lists.
-func jaccard(a, b []int) float64 {
-	i, j, inter := 0, 0, 0
+// intersect counts the indices two sorted lists share.
+func intersect(a, b []int) int {
+	i, j, n := 0, 0, 0
 	for i < len(a) && j < len(b) {
 		switch {
 		case a[i] == b[j]:
-			inter++
+			n++
 			i++
 			j++
 		case a[i] < b[j]:
@@ -202,11 +202,24 @@ func jaccard(a, b []int) float64 {
 			j++
 		}
 	}
-	union := len(a) + len(b) - inter
-	if union == 0 {
-		return 0
+	return n
+}
+
+// jaccard is |a∩b| / |a∪b|.
+func jaccard(a, b []int) float64 {
+	n := intersect(a, b)
+	if u := len(a) + len(b) - n; u > 0 {
+		return float64(n) / float64(u)
 	}
-	return float64(inter) / float64(union)
+	return 0
+}
+
+// overlap is |a∩b| / min(|a|,|b|): 1 when one set sits inside the other.
+func overlap(a, b []int) float64 {
+	if m := min(len(a), len(b)); m > 0 {
+		return float64(intersect(a, b)) / float64(m)
+	}
+	return 0
 }
 
 var hashtagRE = regexp.MustCompile(`#[\p{L}\p{N}_]{2,}`)
