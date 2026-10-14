@@ -180,6 +180,9 @@ func (b *Bot) trends(ctx context.Context, region, category string) string {
 			arrow = "↓"
 		}
 		fmt.Fprintf(&sb, "%d. **%s** %s score %.1f · %d channels · e.g. *%s*\n", n+1, t.Term, arrow, t.Score, t.Channels, clip(first(t.Examples), 60))
+		if len(t.Related) > 0 {
+			fmt.Fprintf(&sb, "   also: %s\n", strings.Join(t.Related[:min(3, len(t.Related))], " "))
+		}
 	}
 	return sb.String()
 }

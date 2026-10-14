@@ -2,6 +2,7 @@ package trends
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -75,4 +76,48 @@ func TestTrackerMeasuresGrowth(t *testing.T) {
 	if first[0].Growth != 0 || second[0].Growth <= 0 {
 		t.Fatalf("growth first=%v second=%v", first[0].Growth, second[0].Growth)
 	}
+}
+
+func TestOneStoryDoesNotFillTheList(t *testing.T) {
+	// Two channels upload the same trailer with the same tag set; a third
+	// trend is unrelated.
+	tags := []string{"Narnia", "Aslan", "The Magician's Nephew", "Netflix"}
+	vs := []youtube.Video{
+		vid("a", "NARNIA: The Magician's Nephew | Official Trailer", 900000, tags...),
+		vid("b", "NARNIA: The Magician's Nephew | Official Trailer", 800000, tags...),
+		vid("c", "Speedrun", 5000, "speedrun"),
+		vid("d", "Speedrun 2", 5000, "speedrun"),
+	}
+	got := Score(vs, nil, now)
+	if len(got) != 2 {
+		t.Fatalf("want 2 grouped trends, got %+v", got)
+	}
+	if got[0].Term != "#Narnia" || len(got[0].Related) != 3 {
+		t.Fatalf("lead %+v", got[0])
+	}
+	for _, r := range got[0].Related {
+		if strings.ContainsAny(r, "' ") {
+			t.Errorf("invalid hashtag %q", r)
+		}
+	}
+	if got[1].Key != "speedrun" {
+		t.Fatalf("second %+v", got[1])
+	}
+}
+
+func TestTrackerRemembersRelatedHeat(t *testing.T) {
+	src := &staticSrc{vs: []youtube.Video{vid("a", "x", 1000, "one", "two"), vid("b", "y", 1000, "one", "two")}}
+	tr := NewTracker(src)
+	tr.now = func() time.Time { return now }
+	tr.Snapshot(context.Background(), "US", "")
+	second, _ := tr.Snapshot(context.Background(), "US", "")
+	if second[0].Growth != 0 {
+		t.Fatalf("related tag should not look new on the next poll: %+v", second[0])
+	}
+}
+
+type staticSrc struct{ vs []youtube.Video }
+
+func (s *staticSrc) MostPopular(ctx context.Context, region, category string, max int) ([]youtube.Video, error) {
+	return s.vs, nil
 }

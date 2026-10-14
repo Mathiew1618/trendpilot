@@ -425,6 +425,9 @@ func trendsCmd(ctx context.Context, args []string) error {
 			ex = t.Examples[0]
 		}
 		fmt.Printf("%-4d %-28s %7.1f %8d %7.0f%%  %.50s\n", i+1, t.Term, t.Score, t.Channels, t.Crowding*100, ex)
+		if len(t.Related) > 0 {
+			fmt.Printf("     related: %s\n", strings.Join(t.Related, " "))
+		}
 	}
 	return nil
 }

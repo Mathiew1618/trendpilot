@@ -5,6 +5,7 @@ package trends
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"regexp"
 	"sort"
@@ -26,6 +27,11 @@ type Trend struct {
 	Crowding float64  `json:"crowding"` // share of trending channels already on it
 	Score    float64  `json:"score"`
 	Examples []string `json:"examples"` // up to 3 video titles
+	// Related are tags that appear on exactly the same videos (one story's
+	// tag set). They are folded into this trend so a single viral video
+	// cannot fill the whole list.
+	Related     []string `json:"related,omitempty"`
+	relatedKeys []string
 }
 
 type Source interface {
@@ -61,6 +67,9 @@ func (t *Tracker) Snapshot(ctx context.Context, region, category string) ([]Tren
 	heat := make(map[string]float64, len(out))
 	for _, tr := range out {
 		heat[tr.Key] = tr.Heat
+		for _, k := range tr.relatedKeys {
+			heat[k] = tr.Heat // same videos, same heat
+		}
 	}
 	t.mu.Lock()
 	t.prev[scope] = heat
@@ -74,6 +83,7 @@ type acc struct {
 	channels map[string]bool
 	heat     float64
 	examples []string
+	vids     []int
 }
 
 // Score is pure so it can be tested without the network. prev may be nil
@@ -81,7 +91,7 @@ type acc struct {
 func Score(vs []youtube.Video, prev map[string]float64, now time.Time) []Trend {
 	terms := map[string]*acc{}
 	allChannels := map[string]bool{}
-	for _, v := range vs {
+	for i, v := range vs {
 		allChannels[v.ChannelID] = true
 		hours := math.Max(now.Sub(v.PublishedAt).Hours(), 1)
 		vph := math.Log1p(float64(v.Views) / hours)
@@ -101,6 +111,7 @@ func Score(vs []youtube.Video, prev map[string]float64, now time.Time) []Trend {
 			a.videos++
 			a.channels[v.ChannelID] = true
 			a.heat += vph
+			a.vids = append(a.vids, i)
 			if len(a.examples) < 3 {
 				a.examples = append(a.examples, v.Title)
 			}
@@ -108,6 +119,7 @@ func Score(vs []youtube.Video, prev map[string]float64, now time.Time) []Trend {
 	}
 
 	out := make([]Trend, 0, len(terms))
+	sigs := map[string]string{} // key -> signature of the videos using it
 	for k, a := range terms {
 		// A tag only one channel uses is that channel's branding, not a trend.
 		if len(a.channels) < 2 {
@@ -131,14 +143,47 @@ func Score(vs []youtube.Video, prev map[string]float64, now time.Time) []Trend {
 			Score:    round(a.heat * (1 + g) * (1 - crowding)),
 			Examples: a.examples,
 		})
+		sigs[k] = fmt.Sprint(a.vids)
+	}
+	// Best first; on a tie prefer the tag that names the story in its
+	// titles ("Narnia" over "Aslan"), then the shorter one.
+	hits := func(t Trend) int {
+		n := 0
+		for _, ex := range t.Examples {
+			if strings.Contains(Normalize(ex), t.Key) {
+				n++
+			}
+		}
+		return n
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Score != out[j].Score {
 			return out[i].Score > out[j].Score
 		}
+		if hi, hj := hits(out[i]), hits(out[j]); hi != hj {
+			return hi > hj
+		}
+		if len(out[i].Key) != len(out[j].Key) {
+			return len(out[i].Key) < len(out[j].Key)
+		}
 		return out[i].Key < out[j].Key
 	})
-	return out
+
+	// Fold tags with identical video sets into the first (best) of them.
+	lead := map[string]int{} // signature -> index in grouped
+	grouped := out[:0:0]
+	for _, t := range out {
+		if i, ok := lead[sigs[t.Key]]; ok {
+			if len(grouped[i].Related) < 5 {
+				grouped[i].Related = append(grouped[i].Related, t.Term)
+			}
+			grouped[i].relatedKeys = append(grouped[i].relatedKeys, t.Key)
+			continue
+		}
+		lead[sigs[t.Key]] = len(grouped)
+		grouped = append(grouped, t)
+	}
+	return grouped
 }
 
 var hashtagRE = regexp.MustCompile(`#[\p{L}\p{N}_]{2,}`)
@@ -182,17 +227,19 @@ func display(forms map[string]int) string {
 		}
 	}
 	best = strings.TrimPrefix(best, "#")
-	if strings.ContainsAny(best, " -") {
-		// Multi-word tag: CamelCase it so it works as a hashtag.
-		parts := strings.FieldsFunc(best, func(r rune) bool { return r == ' ' || r == '-' })
+	// Apostrophes vanish ("Magician's" -> "Magicians"); any other
+	// punctuation or space splits words, which are CamelCased so the
+	// result is a valid hashtag (letters and digits only).
+	best = strings.NewReplacer("'", "", "’", "").Replace(best)
+	parts := strings.FieldsFunc(best, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' })
+	if len(parts) > 1 {
 		for i, p := range parts {
 			rs := []rune(p)
 			rs[0] = unicode.ToUpper(rs[0])
 			parts[i] = string(rs)
 		}
-		best = strings.Join(parts, "")
 	}
-	return "#" + best
+	return "#" + strings.Join(parts, "")
 }
 
 func round(f float64) float64 { return math.Round(f*100) / 100 }
