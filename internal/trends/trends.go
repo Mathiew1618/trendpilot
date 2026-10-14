@@ -5,7 +5,6 @@ package trends
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"regexp"
 	"sort"
@@ -119,7 +118,7 @@ func Score(vs []youtube.Video, prev map[string]float64, now time.Time) []Trend {
 	}
 
 	out := make([]Trend, 0, len(terms))
-	sigs := map[string]string{} // key -> signature of the videos using it
+	sets := map[string][]int{} // key -> indices of the videos using it
 	for k, a := range terms {
 		// A tag only one channel uses is that channel's branding, not a trend.
 		if len(a.channels) < 2 {
@@ -143,7 +142,7 @@ func Score(vs []youtube.Video, prev map[string]float64, now time.Time) []Trend {
 			Score:    round(a.heat * (1 + g) * (1 - crowding)),
 			Examples: a.examples,
 		})
-		sigs[k] = fmt.Sprint(a.vids)
+		sets[k] = a.vids
 	}
 	// Best first; on a tie prefer the tag that names the story in its
 	// titles ("Narnia" over "Aslan"), then the shorter one.
@@ -169,21 +168,45 @@ func Score(vs []youtube.Video, prev map[string]float64, now time.Time) []Trend {
 		return out[i].Key < out[j].Key
 	})
 
-	// Fold tags with identical video sets into the first (best) of them.
-	lead := map[string]int{} // signature -> index in grouped
+	// Fold tags that mostly share videos with a better-ranked tag into it:
+	// they are one story's tag set.
 	grouped := out[:0:0]
+next:
 	for _, t := range out {
-		if i, ok := lead[sigs[t.Key]]; ok {
-			if len(grouped[i].Related) < 5 {
-				grouped[i].Related = append(grouped[i].Related, t.Term)
+		for i := range grouped {
+			if jaccard(sets[t.Key], sets[grouped[i].Key]) >= 0.6 {
+				if len(grouped[i].Related) < 5 {
+					grouped[i].Related = append(grouped[i].Related, t.Term)
+				}
+				grouped[i].relatedKeys = append(grouped[i].relatedKeys, t.Key)
+				continue next
 			}
-			grouped[i].relatedKeys = append(grouped[i].relatedKeys, t.Key)
-			continue
 		}
-		lead[sigs[t.Key]] = len(grouped)
 		grouped = append(grouped, t)
 	}
 	return grouped
+}
+
+// jaccard is |a∩b| / |a∪b| for two sorted index lists.
+func jaccard(a, b []int) float64 {
+	i, j, inter := 0, 0, 0
+	for i < len(a) && j < len(b) {
+		switch {
+		case a[i] == b[j]:
+			inter++
+			i++
+			j++
+		case a[i] < b[j]:
+			i++
+		default:
+			j++
+		}
+	}
+	union := len(a) + len(b) - inter
+	if union == 0 {
+		return 0
+	}
+	return float64(inter) / float64(union)
 }
 
 var hashtagRE = regexp.MustCompile(`#[\p{L}\p{N}_]{2,}`)
@@ -207,7 +230,12 @@ func Normalize(s string) string {
 	return b.String()
 }
 
+// stop lists tags too generic to help anyone be discovered.
 var stop = map[string]bool{
+	"trailer": true, "officialtrailer": true, "movietrailer": true, "teaser": true,
+	"musicvideo": true, "officialmusicvideo": true, "newmusic": true, "officialvideo": true,
+	"gaming": true, "gameplay": true, "games": true, "game": true, "movie": true, "movies": true,
+	"adventure": true, "comedy": true, "vlog": true, "news": true, "highlights": true,
 	"video": true, "videos": true, "youtube": true, "shorts": true, "short": true,
 	"new": true, "official": true, "viral": true, "trending": true, "fyp": true,
 	"foryou": true, "subscribe": true, "music": true, "funny": true, "live": true,
@@ -215,7 +243,15 @@ var stop = map[string]bool{
 
 func usable(k string) bool {
 	n := len([]rune(k))
-	return n >= 2 && n <= 40 && !stop[k]
+	if n < 2 || n > 40 || stop[k] {
+		return false
+	}
+	for _, r := range k {
+		if !unicode.IsDigit(r) {
+			return true
+		}
+	}
+	return false // bare numbers and years
 }
 
 // display picks the most common original spelling, rendered as a hashtag.
